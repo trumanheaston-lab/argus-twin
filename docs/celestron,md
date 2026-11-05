@@ -1,0 +1,34 @@
+# Driving a Celestron NexStar mount (SLT)
+
+The dashboard can steer a Celestron alt-az mount through the hand controller's mini-USB port, using Celestron's published NexStar serial protocol (9600 baud). The mount's own alignment is not used: Argus-Twin keeps its own north and level reference (see HOME).
+
+## Status: tested against a fake mount only
+
+The protocol bytes are checked against the examples in Celestron's document, and the tracking, watchdog and safety logic are tested against a simulated mount (`tests/test_nexstar.py`). **It has not yet run on a real mount.** Three things are assumptions until you test them:
+
+1. A positive azimuth rate turns the mount toward increasing azimuth. If it turns the other way, tracking stops itself with `ERR,LOST_TRACK`. Tell me and I will flip the sign.
+2. The `z` position reply is usable without running the hand controller's own star alignment.
+3. Your SLT firmware supports the commands used (variable-rate needs 1.6+, precise GoTo 2.2+). The link prints the version on connect (`INFO,VERSION,...`).
+
+## Setup
+
+1. Set the tripod up level, and power the mount.
+2. Plug a standard **mini-USB** cable from the hand controller's bottom port to your computer.
+3. Find the port: Device Manager > Ports (COM & LPT). If nothing new appears, Windows needs a driver for the hand controller's USB port. Tell me what does show up.
+4. Close any other program that uses that port (Celestron's own software, NexRemote).
+5. Start the server, open the dashboard, click **Connect Celestron**, and enter the port (for example `COM5`).
+6. Aim the tube **level and due north** by hand (a phone compass set to true north is fine), then click **Homing**. This is the dashboard's zero reference.
+
+## First test, in this order
+
+1. Stand next to the mount with your hand near the power switch.
+2. **Park** (a plain GoTo to level). Confirm it moves smoothly and stops.
+3. Pick a satellite that is high and slow, click **Enable Tracking Lock**, and watch the first 30 seconds.
+
+## Safety notes
+
+- The mount keeps turning at the last speed it was given. The link stops motion if target updates stop for 5 seconds, if the pointing error keeps growing, on STOP, and on disconnect. Those are tested against the fake mount, but stay near the mount for the first real runs.
+- Speed is capped at 2 degrees per second. Passes that go almost straight overhead need faster azimuth motion than the mount can deliver, and the link will stop with `ERR,LOST_TRACK`. A pass planner that flags these ahead of time is a planned feature.
+- Mind cables and the phone mount. Nothing in the software knows where they are.
+- Never point the telescope at the Sun without a certified solar filter. The planned Astronomy mode excludes the Sun.
+- PARK points the tube level (`PARK_ALT_DEG` in `src/gimbal.py`). Change it if that hits your tripod.

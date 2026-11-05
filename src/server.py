@@ -10,6 +10,7 @@ import os
 
 from flask import Flask, jsonify, request, send_from_directory
 
+import gimbal  # pyright: ignore[reportMissingImports]
 import satcat
 import tracker
 from catalog import CATALOG
@@ -80,6 +81,63 @@ def api_info(norad):
     return jsonify(info)
 
 
+def _body():
+    return request.get_json(silent=True) or {}
+
+
+@app.get('/api/gimbal')
+def gimbal_status():
+    return jsonify(gimbal.gimbal.status())
+
+
+@app.post('/api/gimbal/connect')
+def gimbal_connect():
+    port = str(_body().get('port', '')).strip()
+    if not port:
+        return jsonify({'ok': False, 'message': 'port required (SIM or e.g. COM5)'}), 400
+    try:
+        gimbal.gimbal.connect(port)
+    except Exception as exc:
+        return jsonify({'ok': False, 'message': f'could not connect: {exc}'}), 500
+    return jsonify({'ok': True, 'message': 'connected to ' + port})
+
+
+@app.post('/api/gimbal/disconnect')
+def gimbal_disconnect():
+    gimbal.gimbal.disconnect()
+    return jsonify({'ok': True, 'message': 'disconnected'})
+
+
+@app.post('/api/gimbal/track')
+def gimbal_track():
+    norad = _body().get('norad')
+    try:
+        if norad is None:
+            gimbal.gimbal.release()
+            return jsonify({'ok': True, 'message': 'tracking lock released'})
+        norad = int(norad)
+        if tracker.tracked(norad) is None:
+            return jsonify({'ok': False, 'message': 'unknown satellite'}), 404
+        gimbal.gimbal.track(norad)
+    except RuntimeError as exc:
+        return jsonify({'ok': False, 'message': str(exc)}), 409
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'message': 'bad norad'}), 400
+    return jsonify({'ok': True, 'message': f'tracking NORAD {norad}'})
+
+
+@app.post('/api/gimbal/command')
+def gimbal_command():
+    cmd = str(_body().get('cmd', '')).upper()
+    if cmd not in gimbal.COMMANDS:
+        return jsonify({'ok': False, 'message': 'unknown command'}), 400
+    try:
+        gimbal.gimbal.command(cmd)
+    except RuntimeError as exc:
+        return jsonify({'ok': False, 'message': str(exc)}), 409
+    return jsonify({'ok': True, 'message': cmd + ' sent'})
+
+
 @app.post('/api/refresh')
 def api_refresh():
     ok, message = tracker.force_refresh()
@@ -90,3 +148,4 @@ if __name__ == '__main__':
     tracker.load_satellites()
     satcat.load()
     app.run(host='127.0.0.1', port=5000, debug=False)
+    

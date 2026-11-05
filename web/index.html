@@ -149,7 +149,7 @@
 
         .controls-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
             gap: 6px;
             margin-top: auto;
         }
@@ -223,12 +223,18 @@
         <!-- 05 Ground Station Controls -->
         <div class="panel" style="grid-column: span 2;">
             <div class="panel-title">[05] Ground Station Controls</div>
-            <div style="font-size: 11px; color: #888; margin-bottom: 8px;">MANUAL OVERRIDE & STEPPER MOTOR MANAGEMENT. GIMBAL NOT CONNECTED YET: COMMANDS ARE LOGGED ONLY.</div>
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;" id="gimbal-line">GIMBAL: NOT CONNECTED</div>
+            <div style="font-size: 10px; color: #555; margin-bottom: 8px;">HOMING ZEROES AT THE CURRENT POSE: AIM LEVEL AND DUE NORTH FIRST.</div>
             <div class="controls-grid">
-                <button onclick="triggerAction('HOMING')">HOMING / ZERO AXES</button>
-                <button onclick="triggerAction('TRACKING_LOCK')">ENABLE TRACKING LOCK</button>
-                <button onclick="triggerAction('PARK_ZENITH')">PARK GIMBAL (ZENITH)</button>
+                <button onclick="gimbalConnect('SIM')">CONNECT SIMULATOR</button>
+                <button onclick="gimbalConnectNexStar()">CONNECT CELESTRON</button>
+                <button onclick="gimbalConnectSerial()">CONNECT ARDUINO GIMBAL</button>
+                <button onclick="gimbalDisconnect()">DISCONNECT</button>
                 <button onclick="refreshEphemeris()">REFRESH EPHEMERIS CACHE</button>
+                <button onclick="gimbalCommand('HOME')">HOMING / ZERO AXES</button>
+                <button onclick="gimbalLock()">ENABLE TRACKING LOCK</button>
+                <button onclick="gimbalCommand('PARK')">PARK GIMBAL (ZENITH)</button>
+                <button onclick="gimbalCommand('STOP')">STOP / RELEASE LOCK</button>
             </div>
         </div>
     </div>
@@ -379,7 +385,6 @@
                 return;
             }
             logTerminal(`TARGET SELECTED: NORAD ${norad}`);
-            logTerminal('GIMBAL: NOT CONNECTED. NO VECTOR SENT.');
             poll();
             try {
                 if (!infoCache[norad]) {
@@ -465,8 +470,62 @@
         }
 
         // ---- Buttons ----------------------------------------------------------
-        function triggerAction(action) {
-            logTerminal(`${action}: NOT SENT. GIMBAL HARDWARE NOT CONNECTED.`);
+        // ---- Gimbal ------------------------------------------------------------
+        let lastSeq = 0;
+
+        async function gimbalPost(path, body) {
+            try {
+                const res = await fetch('/api/gimbal' + path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body || {}),
+                });
+                const data = await res.json();
+                logTerminal((res.ok ? 'GIMBAL: ' : 'GIMBAL REFUSED: ') + data.message);
+                return res.ok;
+            } catch (err) {
+                logTerminal('GIMBAL REQUEST FAILED (' + err.message + ')');
+                return false;
+            }
+        }
+
+        const gimbalConnect = (port) => gimbalPost('/connect', { port });
+        const gimbalDisconnect = () => gimbalPost('/disconnect');
+        const gimbalCommand = (cmd) => gimbalPost('/command', { cmd });
+
+        function gimbalConnectSerial() {
+            const port = window.prompt('Serial port, for example COM5 (see Arduino IDE > Tools > Port):');
+            if (port) gimbalConnect(port.trim());
+        }
+
+        function gimbalConnectNexStar() {
+            const port = window.prompt('Celestron hand controller COM port, for example COM5 (Device Manager > Ports):');
+            if (port) gimbalConnect('NEXSTAR:' + port.trim());
+        }
+
+        function gimbalLock() {
+            if (selected === null) { logTerminal('PICK A TARGET FIRST.'); return; }
+            gimbalPost('/track', { norad: selected });
+        }
+
+        async function pollGimbal() {
+            try {
+                const res = await fetch('/api/gimbal', { cache: 'no-store' });
+                const g = await res.json();
+                let line = 'GIMBAL: ';
+                if (!g.connected) line += 'NOT CONNECTED';
+                else {
+                    line += `${g.link} // ${g.state}`;
+                    if (g.pos) line += ` // AZ ${g.pos.az.toFixed(2)}° EL ${g.pos.el.toFixed(2)}°`;
+                    line += g.tracking !== null ? ` // LOCKED ON NORAD ${g.tracking}` : ' // NO LOCK';
+                }
+                $('gimbal-line').innerText = line;
+                // Show new device messages once (the server keeps the last few).
+                if (g.log.length && g.log[g.log.length - 1].seq < lastSeq) lastSeq = 0;   // server restarted
+                for (const entry of g.log) {
+                    if (entry.seq > lastSeq) { logTerminal(entry.text); lastSeq = entry.seq; }
+                }
+            } catch (err) { /* server offline: poll() already reports it */ }
         }
 
         async function refreshEphemeris() {
@@ -485,6 +544,7 @@
         logTerminal('ARGUS-TWIN DASHBOARD STARTED.');
         poll();
         setInterval(poll, POLL_MS);
+        setInterval(pollGimbal, POLL_MS);
     </script>
 </body>
 </html>

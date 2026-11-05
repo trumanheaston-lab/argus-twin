@@ -74,6 +74,7 @@ FIXTURE = (
     'CZ-4C R/B,2019-001B,99001,R/B,,PRC,2019-01-01,JSC,,100,98,800,780,LARGE,,EA,ORB\n'
     'BAD ROW,x,notanumber,PAY,,US,,,,,,,,,,,\n'
 )
+recs = {}
 with tempfile.TemporaryDirectory() as d:
     path = os.path.join(d, 'fixture.csv')
     with open(path, 'w', encoding='utf-8') as f:
