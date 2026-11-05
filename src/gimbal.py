@@ -12,7 +12,9 @@ import collections
 import threading
 import time
 
-import tracker
+import horizon
+import safety
+import targets
 
 TICK_S = 1.0                      # how often a target line is sent
 POLL_S = 0.1                      # how often we read replies from the link
@@ -108,8 +110,8 @@ class SerialLink:
     """Real board over USB serial, 115200 baud, one text line per message."""
 
     def __init__(self, port, baud=115200):
-        from importlib import import_module
-        serial = import_module('serial')   # pip install pyserial
+        import importlib
+        serial = importlib.import_module('serial')  # pip install pyserial
         self.name = port
         self._ser = serial.Serial(port, baud, timeout=0)
         self._buf = b''
@@ -153,7 +155,7 @@ class NexStarLink:
 
     def __init__(self, port=None, ser=None, baud=9600):
         if ser is None:
-            import serial  # type: ignore[reportMissingModuleSource]  # pip install pyserial
+            serial = __import__('serial')       # pip install pyserial
             ser = serial.Serial(port, baud, timeout=0.05)
         self._ser = ser
         self.name = 'NEXSTAR ' + (port or 'TEST')
@@ -366,7 +368,7 @@ class Gimbal:
         self.log = collections.deque(maxlen=60)
         self._seq = 0
         self._last_send = 0.0
-        self._warned_horizon = False
+        self._last_block = None
 
     # ---- bookkeeping ----
     def _log(self, msg):
@@ -429,14 +431,15 @@ class Gimbal:
             self.tracking = None            # any manual command releases the lock
         self.send(cmd)
 
-    def track(self, norad):
+    def track(self, target):
+        """Lock on to a satellite (int NORAD id) or a sky object (string id)."""
         with self._lock:
             if self._link is None:
                 raise RuntimeError('gimbal not connected')
-            self.tracking = int(norad)
+            self.tracking = targets.normalize(target)
             self._last_send = 0.0
-            self._warned_horizon = False
-            self._log(f'TRACKING LOCK ON: NORAD {self.tracking}')
+            self._last_block = None
+            self._log(f'TRACKING LOCK ON: {self.tracking}')
 
     def release(self):
         with self._lock:
@@ -461,20 +464,41 @@ class Gimbal:
                     self.disconnect()
                     return
 
+    def _note_block(self, message):
+        """Log why we are holding, once per change rather than once per second."""
+        if message != self._last_block:
+            self._log(message)
+            self._last_block = message
+
     def _maybe_send_target(self):
         if self.tracking is None or time.monotonic() - self._last_send < TICK_S:
             return
         self._last_send = time.monotonic()
-        st = tracker.tracked(self.tracking)
+        st = targets.state(self.tracking)
         if st is None or st['az'] is None:
-            self._log('NO SOLUTION FOR TARGET. NOT SENDING.')
+            self._note_block('NO SOLUTION FOR TARGET. NOT SENDING.')
             return
+
+        # Anything that makes pointing here unsafe or pointless: send nothing, and the
+        # controller's watchdog stops the motors a few seconds later.
+        block = None
         if st['el'] < 0.0:
-            if not self._warned_horizon:
-                self._log('TARGET BELOW HORIZON. HOLDING POSITION.')
-                self._warned_horizon = True
-            return                       # firmware watchdog will stop motion
-        self._warned_horizon = False
+            block = 'TARGET BELOW HORIZON. HOLDING POSITION.'
+        elif horizon.blocked(st['az'], st['el']):
+            block = (f"TARGET BEHIND HORIZON MASK ({st['el']:.1f} < "
+                     f"{horizon.floor(st['az']):.1f} DEG). HOLDING POSITION.")
+        else:
+            block = safety.keepout_reason(st['az'], st['el'])
+            if block is None and self.pos is not None:
+                block = safety.path_reason((self.pos['az'], self.pos['el']),
+                                           (st['az'], st['el']))
+            if block:
+                block += '. HOLDING POSITION.'
+        if block:
+            self._note_block(block)
+            return
+
+        self._last_block = None
         self._link.write_line(
             f"T,{st['az']:.3f},{st['el']:.3f},{st['az_rate']:.4f},{st['el_rate']:.4f}")
 

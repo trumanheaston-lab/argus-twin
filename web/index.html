@@ -28,9 +28,13 @@
             align-items: center;
             padding: 0 15px;
             background: #050505;
+            gap: 12px;
         }
-        .sys-title { color: #ff3333; font-weight: 600; }
-        .sys-meta { color: #777; font-size: 11px; }
+        .sys-title { color: #ff3333; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sys-meta { color: #777; font-size: 11px; white-space: nowrap; }
+        .mode-switch { display: flex; gap: 4px; }
+        .mode-switch button { padding: 4px 10px; font-size: 10px; }
+        button.active { border-color: #ff3333; color: #ff3333; }
 
         .dashboard-grid {
             display: grid;
@@ -57,7 +61,12 @@
             padding-bottom: 4px;
             margin-bottom: 8px;
             text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
+        .tabs { display: flex; gap: 4px; }
+        .tabs button { padding: 2px 8px; font-size: 9px; }
 
         .sat-select {
             background-color: #050505;
@@ -72,7 +81,7 @@
             cursor: pointer;
             border-radius: 0;
         }
-        .sat-select option { background: #000; color: #fff; }
+        .sat-select option, .sat-select optgroup { background: #000; color: #fff; }
 
         .telemetry-readouts {
             display: grid;
@@ -85,6 +94,7 @@
             text-align: right;
             font-variant-numeric: tabular-nums;
         }
+        .hidden { display: none !important; }
 
         .object-info {
             font-size: 11px;
@@ -93,8 +103,9 @@
             overflow-y: auto;
         }
         .object-info p { margin-bottom: 6px; }
+        .muted { color: #777; }
 
-        .image-container {
+        .view-container {
             flex-grow: 1;
             min-height: 0;
             border: 1px solid #333;
@@ -105,12 +116,13 @@
             overflow: hidden;
             position: relative;
         }
-        .image-container img {
+        .view-container img {
             width: 100%;
             height: 100%;
             object-fit: cover;
             display: none;
         }
+        #sky-canvas { width: 100%; height: 100%; display: none; cursor: crosshair; }
         .img-status {
             position: absolute;
             color: #555;
@@ -120,11 +132,7 @@
             pointer-events: none;
             white-space: pre-line;
         }
-        .img-credit {
-            font-size: 9px;
-            color: #555;
-            margin-top: 4px;
-        }
+        .img-credit { font-size: 9px; color: #555; margin-top: 4px; }
 
         .terminal-container {
             display: flex;
@@ -140,11 +148,7 @@
             flex-grow: 1;
         }
         .terminal-log p { margin-bottom: 4px; }
-        .terminal-actions {
-            margin-top: 6px;
-            display: flex;
-            justify-content: flex-end;
-        }
+        .terminal-actions { margin-top: 6px; display: flex; justify-content: flex-end; }
         .terminal-actions button { padding: 4px 8px; font-size: 10px; }
 
         .controls-grid {
@@ -165,20 +169,40 @@
             border-radius: 0;
         }
         button:hover { border-color: #ff3333; color: #ff3333; }
+
+        .modal-back {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+            display: none; align-items: center; justify-content: center; z-index: 10;
+        }
+        .modal-back.open { display: flex; }
+        .modal {
+            background: #050505; border: 1px solid #ff3333; padding: 16px;
+            width: min(520px, 92vw); display: flex; flex-direction: column; gap: 8px;
+        }
+        .modal textarea {
+            background: #000; color: #fff; border: 1px solid #555; font-family: inherit;
+            font-size: 12px; height: 220px; padding: 6px; resize: vertical;
+        }
+        .modal .row { display: flex; gap: 6px; justify-content: flex-end; }
+        .modal .err { color: #ff3333; min-height: 1.2em; }
     </style>
 </head>
 <body>
 
     <header>
-        <div class="sys-title">PROJECT ARGUS-TWIN // STATION: DRIPPING SPRINGS, TX [30.19°N, 98.09°W]</div>
-        <div class="sys-meta"><span id="srv-status">SERVER: CONNECTING</span> &nbsp;|&nbsp; <span id="utc-clock">UTC: --:--:--</span></div>
+        <div class="sys-title">PROJECT ARGUS-TWIN // DRIPPING SPRINGS, TX [30.19°N, 98.09°W]</div>
+        <div class="mode-switch">
+            <button id="mode-sat" class="active" onclick="setMode('sat')">SATELLITES</button>
+            <button id="mode-sky" onclick="setMode('sky')">ASTRONOMY</button>
+        </div>
+        <div class="sys-meta"><span id="sun-line">SUN: --</span> &nbsp;|&nbsp; <span id="srv-status">SERVER: CONNECTING</span> &nbsp;|&nbsp; <span id="utc-clock">UTC: --:--:--</span></div>
     </header>
 
     <div class="dashboard-grid">
         <!-- 01 Telemetry -->
         <div class="panel">
-            <div class="panel-title">[01] Telemetry</div>
-            <label style="font-size: 10px; color: #777; margin-bottom: 3px;" id="dropdown-label">TARGET (ABOVE HORIZON):</label>
+            <div class="panel-title"><span>[01] Telemetry</span></div>
+            <label style="font-size: 10px; color: #777; margin-bottom: 3px;" id="dropdown-label">TARGET:</label>
             <select class="sat-select" id="sat-dropdown">
                 <option value="">WAITING FOR SERVER...</option>
             </select>
@@ -186,7 +210,8 @@
                 <span>TARGET ID</span><span id="val-norad">--</span>
                 <span>AZIMUTH</span><span id="val-az">--</span>
                 <span>ELEVATION</span><span id="val-el">--</span>
-                <span>RANGE</span><span id="val-range">--</span>
+                <span id="lbl-range">RANGE</span><span id="val-range">--</span>
+                <span id="lbl-mag" class="hidden">MAGNITUDE</span><span id="val-mag" class="hidden">--</span>
                 <span>AZ RATE</span><span id="val-azrate">--</span>
                 <span>EL RATE</span><span id="val-elrate">--</span>
                 <span>STATUS</span><span id="val-status">NO TARGET</span>
@@ -195,23 +220,30 @@
 
         <!-- 02 Object Parameters -->
         <div class="panel">
-            <div class="panel-title">[02] Object Parameters</div>
+            <div class="panel-title"><span>[02] Object Parameters</span></div>
             <div class="object-info" id="object-info-panel"><p>SELECT A TARGET.</p></div>
         </div>
 
-        <!-- 03 Image -->
+        <!-- 03 Image / Sky plot -->
         <div class="panel">
-            <div class="panel-title">[03] Image</div>
-            <div class="image-container">
+            <div class="panel-title">
+                <span>[03] View</span>
+                <span class="tabs">
+                    <button id="tab-image" class="active" onclick="setTab('image')">IMAGE</button>
+                    <button id="tab-plot" onclick="setTab('plot')">SKY PLOT</button>
+                </span>
+            </div>
+            <div class="view-container">
                 <div class="img-status" id="img-status">NO TARGET SELECTED</div>
-                <img id="sat-img" alt="Selected satellite" referrerpolicy="no-referrer">
+                <img id="sat-img" alt="Selected target" referrerpolicy="no-referrer">
+                <canvas id="sky-canvas"></canvas>
             </div>
             <div class="img-credit" id="img-credit"></div>
         </div>
 
         <!-- 04 Terminal -->
         <div class="panel">
-            <div class="panel-title">[04] Terminal</div>
+            <div class="panel-title"><span>[04] Terminal</span></div>
             <div class="terminal-container">
                 <div class="terminal-log" id="term-log"></div>
                 <div class="terminal-actions">
@@ -222,19 +254,41 @@
 
         <!-- 05 Ground Station Controls -->
         <div class="panel" style="grid-column: span 2;">
-            <div class="panel-title">[05] Ground Station Controls</div>
+            <div class="panel-title"><span>[05] Ground Station Controls</span></div>
             <div style="font-size: 11px; color: #888; margin-bottom: 4px;" id="gimbal-line">GIMBAL: NOT CONNECTED</div>
-            <div style="font-size: 10px; color: #555; margin-bottom: 8px;">HOMING ZEROES AT THE CURRENT POSE: AIM LEVEL AND DUE NORTH FIRST.</div>
+            <div style="font-size: 10px; color: #555; margin-bottom: 8px;">HOMING ZEROES AT THE CURRENT POSE: AIM LEVEL AND DUE NORTH FIRST. NEVER POINT AT THE SUN. TARGETS WITHIN 15° OF THE SUN ARE BLOCKED.</div>
             <div class="controls-grid">
                 <button onclick="gimbalConnect('SIM')">CONNECT SIMULATOR</button>
                 <button onclick="gimbalConnectNexStar()">CONNECT CELESTRON</button>
                 <button onclick="gimbalConnectSerial()">CONNECT ARDUINO GIMBAL</button>
                 <button onclick="gimbalDisconnect()">DISCONNECT</button>
-                <button onclick="refreshEphemeris()">REFRESH EPHEMERIS CACHE</button>
                 <button onclick="gimbalCommand('HOME')">HOMING / ZERO AXES</button>
                 <button onclick="gimbalLock()">ENABLE TRACKING LOCK</button>
-                <button onclick="gimbalCommand('PARK')">PARK GIMBAL (ZENITH)</button>
+                <button onclick="gimbalCommand('PARK')">PARK GIMBAL</button>
                 <button onclick="gimbalCommand('STOP')">STOP / RELEASE LOCK</button>
+                <button onclick="openHorizon()">EDIT HORIZON MASK</button>
+                <button onclick="horizonSample()">ADD MASK POINT FROM MOUNT</button>
+                <button onclick="refreshEphemeris()">REFRESH SATELLITE DATA</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-back" id="horizon-modal">
+        <div class="modal">
+            <div style="color:#ff3333;">HORIZON MASK: BUILDINGS AND TREES</div>
+            <div class="muted" style="font-size:11px; line-height:1.5;">
+                One point per line: azimuth, elevation (degrees). Azimuth 0 = north, 90 = east.
+                Anything below the line joining the points is hidden and never tracked.
+                For a sharp edge (a roof corner), put two points close together.
+                Easier: point the scope at the top of a tree with the hand controller and press
+                ADD MASK POINT FROM MOUNT. Leave this empty for a flat 10° floor.
+            </div>
+            <textarea id="horizon-text" spellcheck="false" placeholder="90, 35&#10;120, 22&#10;180, 12"></textarea>
+            <div class="err" id="horizon-err"></div>
+            <div class="row">
+                <button onclick="horizonClear()">CLEAR MASK</button>
+                <button onclick="closeHorizon()">CANCEL</button>
+                <button onclick="horizonSave()">SAVE</button>
             </div>
         </div>
     </div>
@@ -242,14 +296,30 @@
     <script>
         const POLL_MS = 1000;
 
-        let selected = null;          // NORAD id of the chosen satellite
+        let mode = 'sat';             // 'sat' (satellites) or 'sky' (astronomy)
+        let tab = 'image';            // 'image' or 'plot'
+        let selected = null;          // id of the chosen target, as a string
         let listKey = '';             // remembers the dropdown contents so we only rebuild on change
         let serverUp = null;          // null = unknown, true/false after first poll
-        let lastStatus = '';          // last status line, so we log changes instead of spamming
-        const infoCache = {};         // norad -> /api/info response
-        const imageCache = {};        // wiki title -> image url
+        let lastStatus = '';
+        let lastState = null;         // last /state payload, for the sky plot
+        let gimbalState = null;       // last /api/gimbal payload
+        let horizonProfile = [];      // the mask sampled around the compass
+        let lastSeq = 0;
+        const infoCache = {};         // 'mode:id' -> info response
+        const imageCache = {};        // wiki title -> image url (or false if none)
 
         const $ = (id) => document.getElementById(id);
+        const apiBase = () => mode === 'sat'
+            ? { state: '/api/state', info: '/api/info/' }
+            : { state: '/api/sky/state', info: '/api/sky/info/' };
+        const idOf = (t) => mode === 'sat' ? String(t.norad) : t.id;
+
+        // Escape text before putting it in HTML (names come from outside data).
+        function esc(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        const row = (label, value) => `<p><strong>${label}:</strong> ${esc(value)}</p>`;
 
         // ---- Clock -----------------------------------------------------------
         setInterval(() => {
@@ -270,10 +340,42 @@
             $('term-log').innerHTML = '<p>> TERMINAL BUFFER CLEARED.</p>';
         }
 
-        // ---- Backend polling (once per second) -----------------------------
+        // ---- Mode and tabs -----------------------------------------------------
+        function setMode(next) {
+            if (next === mode) return;
+            mode = next;
+            selected = null;
+            listKey = '';
+            lastStatus = '';
+            lastState = null;
+            $('mode-sat').classList.toggle('active', mode === 'sat');
+            $('mode-sky').classList.toggle('active', mode === 'sky');
+            $('lbl-mag').classList.toggle('hidden', mode === 'sat');
+            $('val-mag').classList.toggle('hidden', mode === 'sat');
+            $('sat-dropdown').innerHTML = '<option value="">LOADING...</option>';
+            $('object-info-panel').innerHTML = '<p>SELECT A TARGET.</p>';
+            for (const id of ['val-norad','val-az','val-el','val-range','val-mag','val-azrate','val-elrate']) $(id).innerText = '--';
+            $('val-status').innerText = 'NO TARGET';
+            showImageMessage('NO TARGET SELECTED');
+            logTerminal(mode === 'sat' ? 'MODE: SATELLITES' : 'MODE: ASTRONOMY');
+            poll();
+        }
+
+        function setTab(next) {
+            tab = next;
+            $('tab-image').classList.toggle('active', tab === 'image');
+            $('tab-plot').classList.toggle('active', tab === 'plot');
+            $('sky-canvas').style.display = tab === 'plot' ? 'block' : 'none';
+            const img = $('sat-img');
+            img.style.visibility = tab === 'image' ? 'visible' : 'hidden';
+            $('img-status').style.visibility = tab === 'image' ? 'visible' : 'hidden';
+            drawSky();
+        }
+
+        // ---- Polling (once per second) -----------------------------------------
         async function poll() {
             try {
-                const url = '/api/state' + (selected !== null ? `?track=${selected}` : '');
+                const url = apiBase().state + (selected !== null ? `?track=${encodeURIComponent(selected)}` : '');
                 const res = await fetch(url, { cache: 'no-store' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
@@ -282,9 +384,21 @@
                     $('srv-status').innerText = 'SERVER: OK';
                     serverUp = true;
                 }
-                $('dropdown-label').innerText = `TARGET (ABOVE ${data.min_el}° ELEVATION):`;
+                lastState = data;
+                const sunAlt = data.sun ? data.sun.alt : null;
+                $('sun-line').innerText = sunAlt === null ? 'SUN: --'
+                    : `SUN: ${sunAlt.toFixed(0)}° ${sunAlt > -2 ? 'UP' : 'DOWN'}`;
+                $('dropdown-label').innerText = mode === 'sat'
+                    ? 'TARGET (CLEAR OF HORIZON MASK):'
+                    : 'TARGET (CLEAR OF MASK)' + (data.daylight ? ' // DAYLIGHT: ONLY BRIGHT OBJECTS SHOW' : ':');
                 renderDropdown(data.targets);
                 renderTelemetry(data);
+                if (mode === 'sky' && data.ephemeris === false) {
+                    $('object-info-panel').innerHTML =
+                        '<p>ASTRONOMY NEEDS A ONE-TIME DOWNLOAD OF NASA/JPL POSITION DATA (data/de421.bsp, ABOUT 17 MB).</p>' +
+                        `<p class="muted">${esc(data.ephemeris_error || 'NOT LOADED YET')}. THE SERVER RETRIES EVERY 10 MINUTES.</p>`;
+                }
+                drawSky();
             } catch (err) {
                 if (serverUp !== false) {
                     logTerminal('SERVER LINK LOST (' + err.message + '). IS python src/server.py RUNNING?');
@@ -294,52 +408,76 @@
             }
         }
 
-        // Rebuild the dropdown only when the set of satellites changes, and not while
-        // the user has it open (rebuilding an open <select> snaps it shut).
+        const SKY_GROUPS = [
+            ['MOON & PLANETS', k => k === 'Moon' || k === 'Planet'],
+            ['STARS', k => k === 'Star'],
+            ['DEEP SKY', k => k === 'Galaxy' || k === 'Nebula' || k === 'Cluster'],
+        ];
+
+        function optionFor(t) {
+            const opt = document.createElement('option');
+            opt.value = idOf(t);
+            const sun = t.near_sun ? ' (NEAR SUN: BLOCKED)' : '';
+            if (mode === 'sat') {
+                const tag = (!t.featured && t.type) ? ` // ${t.type}` : '';
+                opt.textContent = `${t.name} // NORAD ${t.norad}${tag}${sun}`;
+            } else {
+                const mag = (t.mag !== null && t.mag !== undefined) ? ` // MAG ${t.mag}` : '';
+                opt.textContent = `${t.name} // ${t.kind.toUpperCase()}${mag}${sun}`;
+            }
+            if (opt.value === selected) opt.selected = true;
+            return opt;
+        }
+
+        // Rebuild the dropdown only when its contents change, and not while the user has it
+        // open (rebuilding an open <select> snaps it shut).
         function renderDropdown(targets) {
             const sel = $('sat-dropdown');
-            const key = targets.map(t => t.norad).join(',');
+            const key = mode + '|' + targets.map(t => idOf(t) + (t.near_sun ? '!' : '')).join(',');
             if (key === listKey || document.activeElement === sel) return;
             listKey = key;
 
             sel.innerHTML = '';
             if (targets.length === 0) {
-                sel.innerHTML = '<option value="">NOTHING ABOVE HORIZON</option>';
+                sel.innerHTML = '<option value="">NOTHING CLEAR OF THE HORIZON MASK</option>';
                 return;
             }
             const placeholder = document.createElement('option');
             placeholder.value = '';
-            placeholder.textContent = `-- ${targets.length} ABOVE HORIZON --`;
+            placeholder.textContent = `-- ${targets.length} AVAILABLE --`;
             sel.appendChild(placeholder);
 
-            // Featured targets (ones with a write-up in catalog.py) come first.
-            let selectedStillListed = false;
-            const groups = [
-                ['FEATURED', targets.filter(t => t.featured)],
-                ['OTHER', targets.filter(t => !t.featured)],
-            ];
+            const groups = mode === 'sat'
+                ? [['FEATURED', targets.filter(t => t.featured)], ['OTHER', targets.filter(t => !t.featured)]]
+                : SKY_GROUPS.map(([label, test]) => [label, targets.filter(t => test(t.kind))]);
+            let selectedListed = false;
             for (const [label, members] of groups) {
                 if (members.length === 0) continue;
                 const group = document.createElement('optgroup');
                 group.label = `${label} (${members.length})`;
                 for (const t of members) {
-                    const opt = document.createElement('option');
-                    opt.value = t.norad;
-                    const tag = (!t.featured && t.type) ? ` // ${t.type}` : '';
-                    opt.textContent = `${t.name} // NORAD ${t.norad}${tag}`;
-                    if (t.norad === selected) { opt.selected = true; selectedStillListed = true; }
+                    const opt = optionFor(t);
+                    if (opt.selected) selectedListed = true;
                     group.appendChild(opt);
                 }
                 sel.appendChild(group);
             }
-            // The chosen satellite has set. Keep it in the list so the dropdown does not lie.
-            if (selected !== null && !selectedStillListed) {
+            // The chosen target is no longer clear of the mask. Keep it listed so the dropdown does not lie.
+            if (selected !== null && !selectedListed) {
+                const cached = infoCache[mode + ':' + selected] || {};
                 const opt = document.createElement('option');
                 opt.value = selected;
-                opt.textContent = `${(infoCache[selected] || {}).name || 'TARGET'} // NORAD ${selected} (SET)`;
+                opt.textContent = `${cached.name || 'TARGET'} (OUT OF VIEW)`;
                 opt.selected = true;
                 sel.insertBefore(opt, sel.children[1]);
             }
+        }
+
+        function setRangeRow(text) {
+            const show = text !== null;
+            $('lbl-range').classList.toggle('hidden', !show);
+            $('val-range').classList.toggle('hidden', !show);
+            if (show) $('val-range').innerText = text;
         }
 
         function renderTelemetry(data) {
@@ -349,18 +487,25 @@
                 return;
             }
             if (t.az === null) {
-                $('val-norad').innerText = 'NORAD-' + t.norad;
-                for (const id of ['val-az', 'val-el', 'val-range', 'val-azrate', 'val-elrate']) $(id).innerText = '--';
-                setStatus('NO SOLUTION (TLE STALE)');
+                $('val-norad').innerText = mode === 'sat' ? 'NORAD-' + t.norad : (t.kind || '').toUpperCase();
+                for (const id of ['val-az', 'val-el', 'val-range', 'val-mag', 'val-azrate', 'val-elrate']) $(id).innerText = '--';
+                setStatus(t.error ? 'NO SOLUTION: ' + t.error.toUpperCase() : 'NO SOLUTION');
                 return;
             }
-            $('val-norad').innerText = 'NORAD-' + t.norad;
             $('val-az').innerText = t.az.toFixed(2) + '°';
             $('val-el').innerText = t.el.toFixed(2) + '°';
-            $('val-range').innerText = t.range_km.toFixed(1) + ' KM';
             $('val-azrate').innerText = t.az_rate.toFixed(3) + ' °/S';
             $('val-elrate').innerText = t.el_rate.toFixed(3) + ' °/S';
-            setStatus(t.above ? 'ABOVE HORIZON' : 'BELOW HORIZON');
+            if (mode === 'sat') {
+                $('val-norad').innerText = 'NORAD-' + t.norad;
+                setRangeRow(t.range_km.toFixed(1) + ' KM');
+            } else {
+                $('val-norad').innerText = t.kind.toUpperCase();
+                setRangeRow(t.range_km === null ? null : (t.range_km > 5e6
+                    ? (t.range_km / 149597870.7).toFixed(2) + ' AU' : Math.round(t.range_km).toLocaleString() + ' KM'));
+                $('val-mag').innerText = (t.mag === null || t.mag === undefined) ? '--' : String(t.mag);
+            }
+            setStatus(t.blocked ? 'BLOCKED: ' + t.blocked : (t.above ? 'ABOVE HORIZON' : 'BELOW HORIZON'));
         }
 
         function setStatus(text) {
@@ -371,63 +516,67 @@
 
         // ---- Target selection -------------------------------------------------
         $('sat-dropdown').addEventListener('change', (e) => {
-            const norad = e.target.value ? parseInt(e.target.value, 10) : null;
-            selectTarget(norad);
+            selectTarget(e.target.value || null);
             e.target.blur();
         });
 
-        async function selectTarget(norad) {
-            selected = norad;
+        async function selectTarget(id) {
+            selected = id;
             lastStatus = '';
-            if (norad === null) {
+            if (id === null) {
                 $('object-info-panel').innerHTML = '<p>SELECT A TARGET.</p>';
                 showImageMessage('NO TARGET SELECTED');
                 return;
             }
-            logTerminal(`TARGET SELECTED: NORAD ${norad}`);
+            const sel = $('sat-dropdown');
+            if (sel.value !== id) sel.value = id;
+            logTerminal(`TARGET SELECTED: ${id.toUpperCase()}`);
             poll();
+            const cacheKey = mode + ':' + id;
             try {
-                if (!infoCache[norad]) {
-                    const res = await fetch(`/api/info/${norad}`);
+                if (!infoCache[cacheKey]) {
+                    const res = await fetch(apiBase().info + encodeURIComponent(id));
                     if (!res.ok) throw new Error('HTTP ' + res.status);
-                    infoCache[norad] = await res.json();
+                    infoCache[cacheKey] = await res.json();
                 }
-                if (selected !== norad) return;   // user already picked something else
-                renderInfo(infoCache[norad]);
-                loadImage(infoCache[norad]);
+                if (selected !== id) return;   // user already picked something else
+                renderInfo(infoCache[cacheKey]);
+                loadImage(infoCache[cacheKey]);
             } catch (err) {
                 logTerminal('ERROR: INFO LOOKUP FAILED (' + err.message + ')');
             }
         }
 
-        // Escape text before putting it in HTML (names come from outside data).
-        function esc(s) {
-            return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        }
-        function row(label, value) {
-            return `<p><strong>${label}:</strong> ${esc(value)}</p>`;
-        }
-
         function renderInfo(info) {
             let html = row('NAME', info.name);
-            if (info.mission) {
-                html += row('MISSION', info.mission);
-                if (info.history) html += row('HISTORY', info.history);
-                if (info.science) html += row('SCIENCE FOCUS', info.science);
-            } else if (info.classification) {
-                html += row('CLASSIFICATION', info.classification);
-                html += '<p style="color:#777;">NO WRITE-UP YET. THE LINE ABOVE COMES FROM CELESTRAK SATCAT. ADD A WRITE-UP IN src/catalog.py.</p>';
+            if (mode === 'sky') {
+                html += row('TYPE', info.kind);
+                if (info.constellation) html += row('CONSTELLATION', info.constellation);
+                if (info.about) html += row('ABOUT', info.about);
+                if (info.mag !== null && info.mag !== undefined) html += row('MAGNITUDE', info.mag + ' (LOWER IS BRIGHTER)');
+                if (info.distance) html += row('DISTANCE', info.distance);
+                if (info.phase) html += row('PHASE', `${info.phase}, ${info.illumination}% LIT`);
+                if (info.error) html += `<p class="muted">${esc(info.error.toUpperCase())}</p>`;
             } else {
-                html += '<p style="color:#777;">NO CATALOG DATA AVAILABLE. SHOWING ORBIT DATA FROM THE TLE ONLY.</p>';
+                if (info.mission) {
+                    html += row('MISSION', info.mission);
+                    if (info.history) html += row('HISTORY', info.history);
+                    if (info.science) html += row('SCIENCE FOCUS', info.science);
+                } else if (info.classification) {
+                    html += row('CLASSIFICATION', info.classification);
+                    html += '<p class="muted">NO WRITE-UP YET. THE LINE ABOVE COMES FROM CELESTRAK SATCAT. ADD A WRITE-UP IN src/catalog.py.</p>';
+                } else {
+                    html += '<p class="muted">NO CATALOG DATA AVAILABLE. SHOWING ORBIT DATA FROM THE TLE ONLY.</p>';
+                }
+                if (info.mission && info.object_type_name) {
+                    html += row('TYPE', info.object_type_name);
+                    if (info.owner) html += row('OWNER', info.owner);
+                    if (info.launch_date) html += row('LAUNCHED', info.launch_date);
+                }
+                html += row('INCLINATION', info.inclination_deg + '°');
+                html += row('ORBITAL PERIOD', info.period_min + ' MIN');
+                html += row('TLE AGE', info.tle_age_days + ' DAYS');
             }
-            if (info.mission && info.object_type_name) {
-                html += row('TYPE', info.object_type_name);
-                if (info.owner) html += row('OWNER', info.owner);
-                if (info.launch_date) html += row('LAUNCHED', info.launch_date);
-            }
-            html += row('INCLINATION', info.inclination_deg + '°');
-            html += row('ORBITAL PERIOD', info.period_min + ' MIN');
-            html += row('TLE AGE', info.tle_age_days + ' DAYS');
             $('object-info-panel').innerHTML = html;
         }
 
@@ -441,23 +590,25 @@
 
         async function loadImage(info) {
             if (!info.wiki) {
-                const kind = (info.object_type_name || 'OBJECT').toUpperCase();
+                const kind = (info.object_type_name || info.kind || 'OBJECT').toUpperCase();
                 showImageMessage(`${kind}\nNO PHOTOGRAPH ON FILE`);
                 return;
             }
             showImageMessage('LOADING IMAGE...');
             try {
-                if (!imageCache[info.wiki]) {
+                if (imageCache[info.wiki] === undefined) {
                     const res = await fetch(
                         `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(info.wiki)}`
                     );
                     if (!res.ok) throw new Error('HTTP ' + res.status);
                     const data = await res.json();
-                    const src = (data.thumbnail && data.thumbnail.source) ||
-                                (data.originalimage && data.originalimage.source);
-                    if (!src) throw new Error('no image on page');
-                    imageCache[info.wiki] = src;
+                    // A disambiguation page would show a random unrelated picture, so refuse it.
+                    const src = data.type === 'disambiguation' ? null :
+                        ((data.thumbnail && data.thumbnail.source) ||
+                         (data.originalimage && data.originalimage.source) || null);
+                    imageCache[info.wiki] = src || false;
                 }
+                if (!imageCache[info.wiki]) { showImageMessage('NO PHOTOGRAPH ON FILE'); return; }
                 const img = $('sat-img');
                 img.onload = () => { $('img-status').style.display = 'none'; img.style.display = 'block'; };
                 img.onerror = () => { showImageMessage('IMAGE FAILED TO LOAD'); logTerminal('ERROR: IMAGE LOAD FAILED'); };
@@ -469,10 +620,184 @@
             }
         }
 
-        // ---- Buttons ----------------------------------------------------------
-        // ---- Gimbal ------------------------------------------------------------
-        let lastSeq = 0;
+        // ---- Sky plot -----------------------------------------------------------
+        // Compass view: north up, east right, zenith in the middle, horizon on the rim.
+        function skyGeometry() {
+            const c = $('sky-canvas');
+            const w = c.clientWidth, h = c.clientHeight;
+            const R = Math.min(w, h) / 2 - 20;
+            const cx = w / 2, cy = h / 2;
+            const pt = (az, el) => {
+                const r = (90 - Math.max(el, 0)) / 90 * R, a = az * Math.PI / 180;
+                return [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+            };
+            return { c, w, h, R, cx, cy, pt };
+        }
 
+        // A circle of angular radius `deg` around a direction (az/el treated as lon/lat on a sphere).
+        function sphereCircle(az, el, deg, n = 72) {
+            const lat = el * Math.PI / 180, lon = az * Math.PI / 180, d = deg * Math.PI / 180;
+            const out = [];
+            for (let i = 0; i <= n; i++) {
+                const brg = (i / n) * 2 * Math.PI;
+                const lat2 = Math.asin(Math.sin(lat) * Math.cos(d) + Math.cos(lat) * Math.sin(d) * Math.cos(brg));
+                const lon2 = lon + Math.atan2(Math.sin(brg) * Math.sin(d) * Math.cos(lat),
+                                              Math.cos(d) - Math.sin(lat) * Math.sin(lat2));
+                out.push([((lon2 * 180 / Math.PI) % 360 + 360) % 360, lat2 * 180 / Math.PI]);
+            }
+            return out;
+        }
+
+        function drawSky() {
+            if (tab !== 'plot') return;
+            const { c, w, h, R, cx, cy, pt } = skyGeometry();
+            if (!w || !h) return;
+            const dpr = window.devicePixelRatio || 1;
+            if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+                c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+            }
+            const ctx = c.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            ctx.font = "10px 'IBM Plex Mono', monospace";
+
+            // rings every 30 degrees of elevation, spokes every 90 degrees of azimuth
+            ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
+            for (const el of [0, 30, 60]) { ctx.beginPath(); ctx.arc(cx, cy, (90 - el) / 90 * R, 0, 2 * Math.PI); ctx.stroke(); }
+            for (const az of [0, 90, 180, 270]) { const [x, y] = pt(az, 0); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke(); }
+            ctx.fillStyle = '#777'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            for (const [label, az] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]]) {
+                const a = az * Math.PI / 180;
+                ctx.fillText(label, cx + (R + 11) * Math.sin(a), cy - (R + 11) * Math.cos(a));
+            }
+
+            // horizon mask: shade everything below the mask line
+            if (horizonProfile.length) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, R, 0, 2 * Math.PI);
+                horizonProfile.forEach((p, i) => { const [x, y] = pt(p.az, p.el); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(255, 51, 51, 0.22)';
+                ctx.fill('evenodd');
+                ctx.beginPath();
+                horizonProfile.forEach((p, i) => { const [x, y] = pt(p.az, p.el); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+                ctx.closePath();
+                ctx.strokeStyle = '#ff3333'; ctx.stroke();
+            }
+
+            if (lastState) {
+                // Sun and its keep-out zone
+                const sun = lastState.sun;
+                if (sun && sun.alt > -2) {
+                    ctx.setLineDash([3, 3]); ctx.strokeStyle = '#ffcc33'; ctx.beginPath();
+                    sphereCircle(sun.az, sun.alt, 15).forEach(([az, el], i) => { const [x, y] = pt(az, el); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+                    ctx.stroke(); ctx.setLineDash([]);
+                    const [sx, sy] = pt(sun.az, sun.alt);
+                    ctx.fillStyle = '#ffcc33'; ctx.beginPath(); ctx.arc(sx, sy, 4, 0, 2 * Math.PI); ctx.fill();
+                    ctx.textAlign = 'left'; ctx.fillText('SUN', sx + 7, sy);
+                }
+                // targets
+                for (const t of lastState.targets || []) {
+                    const [x, y] = pt(t.az, t.el);
+                    ctx.fillStyle = t.near_sun ? '#665522' : '#dddddd';
+                    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 2 * Math.PI); ctx.fill();
+                }
+                const tr = lastState.tracked;
+                if (tr && tr.az !== null && tr.el > 0) {
+                    const [x, y] = pt(tr.az, tr.el);
+                    ctx.strokeStyle = '#ff3333'; ctx.beginPath(); ctx.arc(x, y, 6, 0, 2 * Math.PI); ctx.stroke();
+                    ctx.fillStyle = '#ff3333'; ctx.textAlign = 'left'; ctx.fillText(tr.name, x + 9, y - 6);
+                }
+            }
+
+            // where the mount is actually pointing
+            if (gimbalState && gimbalState.pos) {
+                const [x, y] = pt(gimbalState.pos.az, gimbalState.pos.el);
+                ctx.strokeStyle = '#33ccff'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI);
+                ctx.moveTo(x - 12, y); ctx.lineTo(x + 12, y); ctx.moveTo(x, y - 12); ctx.lineTo(x, y + 12);
+                ctx.stroke(); ctx.lineWidth = 1;
+            }
+
+            ctx.fillStyle = '#555'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+            ctx.fillText('RED MASK  CYAN MOUNT  YELLOW SUN+15°', 6, h - 5);
+        }
+
+        // Click a dot on the plot to select that target.
+        $('sky-canvas').addEventListener('click', (e) => {
+            if (!lastState) return;
+            const { c, pt } = skyGeometry();
+            const rect = c.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            let best = null, bestD = 14;
+            for (const t of lastState.targets || []) {
+                const [x, y] = pt(t.az, t.el);
+                const d = Math.hypot(x - mx, y - my);
+                if (d < bestD) { best = t; bestD = d; }
+            }
+            if (best) selectTarget(idOf(best));
+        });
+        window.addEventListener('resize', drawSky);
+
+        // ---- Horizon mask ----------------------------------------------------------
+        async function loadHorizon() {
+            try {
+                const res = await fetch('/api/horizon', { cache: 'no-store' });
+                const data = await res.json();
+                horizonProfile = data.profile || [];
+                return data;
+            } catch (err) { return null; }
+        }
+
+        async function openHorizon() {
+            const data = await loadHorizon();
+            $('horizon-text').value = data ? data.points.map(p => `${p.az}, ${p.el}`).join('\n') : '';
+            $('horizon-err').innerText = '';
+            $('horizon-modal').classList.add('open');
+        }
+        const closeHorizon = () => $('horizon-modal').classList.remove('open');
+
+        async function horizonPut(points) {
+            const res = await fetch('/api/horizon', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ points }),
+            });
+            const data = await res.json();
+            if (!res.ok) { $('horizon-err').innerText = (data.message || 'SAVE FAILED').toUpperCase(); return false; }
+            horizonProfile = data.profile; listKey = ''; drawSky(); poll();
+            logTerminal(`HORIZON MASK SAVED: ${data.points.length} POINTS`);
+            return true;
+        }
+
+        async function horizonSave() {
+            const points = [];
+            for (const raw of $('horizon-text').value.split('\n')) {
+                const line = raw.split('#')[0].trim();
+                if (!line) continue;
+                const parts = line.split(/[\s,;]+/).map(Number);
+                if (parts.length < 2 || parts.slice(0, 2).some(Number.isNaN)) {
+                    $('horizon-err').innerText = `CANNOT READ LINE: "${raw.trim()}"`;
+                    return;
+                }
+                points.push({ az: parts[0], el: parts[1] });
+            }
+            if (await horizonPut(points)) closeHorizon();
+        }
+
+        async function horizonClear() {
+            if (await horizonPut([])) { $('horizon-text').value = ''; closeHorizon(); }
+        }
+
+        async function horizonSample() {
+            try {
+                const res = await fetch('/api/horizon/sample', { method: 'POST' });
+                const data = await res.json();
+                logTerminal((res.ok ? 'HORIZON: ' : 'HORIZON REFUSED: ') + data.message);
+                if (res.ok) { horizonProfile = data.profile; listKey = ''; drawSky(); poll(); }
+            } catch (err) { logTerminal('HORIZON REQUEST FAILED (' + err.message + ')'); }
+        }
+
+        // ---- Gimbal ------------------------------------------------------------
         async function gimbalPost(path, body) {
             try {
                 const res = await fetch('/api/gimbal' + path, {
@@ -505,31 +830,32 @@
 
         function gimbalLock() {
             if (selected === null) { logTerminal('PICK A TARGET FIRST.'); return; }
-            gimbalPost('/track', { norad: selected });
+            gimbalPost('/track', { target: selected });
         }
 
         async function pollGimbal() {
             try {
                 const res = await fetch('/api/gimbal', { cache: 'no-store' });
                 const g = await res.json();
+                gimbalState = g;
                 let line = 'GIMBAL: ';
                 if (!g.connected) line += 'NOT CONNECTED';
                 else {
                     line += `${g.link} // ${g.state}`;
                     if (g.pos) line += ` // AZ ${g.pos.az.toFixed(2)}° EL ${g.pos.el.toFixed(2)}°`;
-                    line += g.tracking !== null ? ` // LOCKED ON NORAD ${g.tracking}` : ' // NO LOCK';
+                    line += g.tracking !== null ? ` // LOCKED ON ${String(g.tracking).toUpperCase()}` : ' // NO LOCK';
                 }
                 $('gimbal-line').innerText = line;
-                // Show new device messages once (the server keeps the last few).
                 if (g.log.length && g.log[g.log.length - 1].seq < lastSeq) lastSeq = 0;   // server restarted
                 for (const entry of g.log) {
                     if (entry.seq > lastSeq) { logTerminal(entry.text); lastSeq = entry.seq; }
                 }
+                drawSky();
             } catch (err) { /* server offline: poll() already reports it */ }
         }
 
         async function refreshEphemeris() {
-            logTerminal('REQUESTING FRESH TLE DOWNLOAD FROM CELESTRAK...');
+            logTerminal('REQUESTING FRESH SATELLITE ELEMENTS FROM CELESTRAK...');
             try {
                 const res = await fetch('/api/refresh', { method: 'POST' });
                 const data = await res.json();
@@ -542,6 +868,7 @@
 
         // ---- Start ------------------------------------------------------------
         logTerminal('ARGUS-TWIN DASHBOARD STARTED.');
+        loadHorizon();
         poll();
         setInterval(poll, POLL_MS);
         setInterval(pollGimbal, POLL_MS);

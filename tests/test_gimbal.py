@@ -7,9 +7,18 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
 
+import tempfile
+
 import gimbal
+import horizon
+import safety
 import server
 import tracker
+
+# Keep the tests independent of the real clock and of any horizon mask you have saved.
+horizon.DATA_FILE = os.path.join(tempfile.mkdtemp(), 'horizon.json')
+horizon._points = None
+safety.sun_altaz = lambda t=None: (-30.0, 0.0)          # night, Sun far below the horizon
 
 gimbal.TICK_S = 0.2                      # speed the tests up
 g = gimbal.gimbal
@@ -100,4 +109,59 @@ assert client.post('/api/gimbal/disconnect').status_code == 200
 st = client.get('/api/gimbal').get_json()
 assert st['connected'] is False and st['tracking'] is None
 print('disconnect OK')
+
+# 10. Horizon mask: a target behind trees is never sent, and the reason is logged once
+assert client.post('/api/gimbal/connect', json={'port': 'SIM'}).status_code == 200
+assert wait_for(lambda: g.status()['pos'] is not None)
+sent = []
+orig_write = g._link.write_line
+g._link.write_line = lambda line: (sent.append(line), orig_write(line))
+horizon.set_points([(0, 60), (180, 60)])               # trees up to 60 degrees everywhere
+FAKE.update(az=30.0, el=40.0)
+g.track(25544)
+time.sleep(1.0)
+assert not [l for l in sent if l.startswith('T,')], sent
+texts = [e['text'] for e in g.status()['log']]
+assert sum('HORIZON MASK' in t for t in texts) == 1, texts      # logged once, not every second
+horizon.set_points([])                                          # trees cut down
+time.sleep(0.8)
+assert [l for l in sent if l.startswith('T,')], 'should send once the mask is gone'
+print('horizon mask blocks tracking OK')
+
+# 11. Sun keep-out: never send a target near the Sun, and never slew across it
+sent.clear()
+g.release()
+safety.sun_altaz = lambda t=None: (40.0, 33.0)                  # Sun right next to the target
+g.track(25544)
+time.sleep(1.0)
+assert not [l for l in sent if l.startswith('T,')], sent
+assert any('SUN KEEP-OUT' in e['text'] for e in g.status()['log'])
+g.release()
+sent.clear()
+safety.sun_altaz = lambda t=None: (20.0, 15.0)                  # target is 24 deg away, but the path crosses
+g._link.az, g._link.el = 0.0, 0.0
+time.sleep(0.8)
+g.track(25544)
+time.sleep(1.0)
+assert not [l for l in sent if l.startswith('T,')], sent
+assert any('SLEW PATH' in e['text'] for e in g.status()['log'])
+print('sun keep-out blocks target and slew path OK')
+
+# 12. Sky objects flow through the same path (string target ids)
+import sky
+g.release()
+sent.clear()
+safety.sun_altaz = lambda t=None: (-30.0, 0.0)
+orig_sky_state = sky.state
+sky.state = lambda oid, t=None: dict(FAKE, id=oid, name='Fake planet', kind='Planet')
+assert client.post('/api/gimbal/track', json={'target': 'jupiter'}).status_code == 200
+assert g.status()['tracking'] == 'jupiter'
+time.sleep(1.0)
+assert [l for l in sent if l.startswith('T,')], sent
+assert client.post('/api/gimbal/track', json={'target': 'definitely-not-real'}).status_code == 400
+assert client.post('/api/gimbal/track', json={'norad': '25544'}).status_code == 200      # old key and string digits still work
+assert g.status()['tracking'] == 25544
+sky.state = orig_sky_state
+client.post('/api/gimbal/disconnect')
+print('sky targets through the gimbal OK')
 print('GIMBAL TESTS PASSED')
