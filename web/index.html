@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PROJECT ARGUS-TWIN // GROUND CONTROL INTERFACE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: #000000;
+            color: #e0e0e0;
+            font-family: 'IBM Plex Mono', 'Consolas', monospace;
+            font-size: 12px;
+            letter-spacing: 0.3px;
+            height: 100vh;
+            display: grid;
+            grid-template-rows: 35px 1fr;
+            overflow: hidden;
+        }
+
+        header {
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 15px;
+            background: #050505;
+        }
+        .sys-title { color: #ff3333; font-weight: 600; }
+        .sys-meta { color: #777; font-size: 11px; }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: 1fr 1fr;
+            gap: 1px;
+            background-color: #333;
+            height: calc(100vh - 35px);
+        }
+
+        .panel {
+            background-color: #000000;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            min-height: 0;
+        }
+
+        .panel-title {
+            font-size: 11px;
+            color: #888;
+            border-bottom: 1px solid #222;
+            padding-bottom: 4px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .sat-select {
+            background-color: #050505;
+            color: #ff3333;
+            border: 1px solid #ff3333;
+            padding: 4px;
+            font-family: inherit;
+            font-size: 11px;
+            width: 100%;
+            margin-bottom: 10px;
+            outline: none;
+            cursor: pointer;
+            border-radius: 0;
+        }
+        .sat-select option { background: #000; color: #fff; }
+
+        .telemetry-readouts {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 6px;
+            font-size: 12px;
+        }
+        .telemetry-readouts span:nth-child(even) {
+            color: #ff3333;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .object-info {
+            font-size: 11px;
+            line-height: 1.5;
+            color: #ccc;
+            overflow-y: auto;
+        }
+        .object-info p { margin-bottom: 6px; }
+
+        .image-container {
+            flex-grow: 1;
+            min-height: 0;
+            border: 1px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #020202;
+            overflow: hidden;
+            position: relative;
+        }
+        .image-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        .img-status {
+            position: absolute;
+            color: #555;
+            font-size: 10px;
+            text-align: center;
+            padding: 10px;
+            pointer-events: none;
+            white-space: pre-line;
+        }
+        .img-credit {
+            font-size: 9px;
+            color: #555;
+            margin-top: 4px;
+        }
+
+        .terminal-container {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            min-height: 0;
+        }
+        .terminal-log {
+            font-size: 11px;
+            color: #ff3333;
+            line-height: 1.4;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+        .terminal-log p { margin-bottom: 4px; }
+        .terminal-actions {
+            margin-top: 6px;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .terminal-actions button { padding: 4px 8px; font-size: 10px; }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-top: auto;
+        }
+        button {
+            background: #000;
+            border: 1px solid #555;
+            color: #fff;
+            padding: 8px;
+            font-family: inherit;
+            font-size: 11px;
+            cursor: pointer;
+            text-transform: uppercase;
+            border-radius: 0;
+        }
+        button:hover { border-color: #ff3333; color: #ff3333; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="sys-title">PROJECT ARGUS-TWIN // STATION: DRIPPING SPRINGS, TX [30.19°N, 98.09°W]</div>
+        <div class="sys-meta"><span id="srv-status">SERVER: CONNECTING</span> &nbsp;|&nbsp; <span id="utc-clock">UTC: --:--:--</span></div>
+    </header>
+
+    <div class="dashboard-grid">
+        <!-- 01 Telemetry -->
+        <div class="panel">
+            <div class="panel-title">[01] Telemetry</div>
+            <label style="font-size: 10px; color: #777; margin-bottom: 3px;" id="dropdown-label">TARGET (ABOVE HORIZON):</label>
+            <select class="sat-select" id="sat-dropdown">
+                <option value="">WAITING FOR SERVER...</option>
+            </select>
+            <div class="telemetry-readouts">
+                <span>TARGET ID</span><span id="val-norad">--</span>
+                <span>AZIMUTH</span><span id="val-az">--</span>
+                <span>ELEVATION</span><span id="val-el">--</span>
+                <span>RANGE</span><span id="val-range">--</span>
+                <span>AZ RATE</span><span id="val-azrate">--</span>
+                <span>EL RATE</span><span id="val-elrate">--</span>
+                <span>STATUS</span><span id="val-status">NO TARGET</span>
+            </div>
+        </div>
+
+        <!-- 02 Object Parameters -->
+        <div class="panel">
+            <div class="panel-title">[02] Object Parameters</div>
+            <div class="object-info" id="object-info-panel"><p>SELECT A TARGET.</p></div>
+        </div>
+
+        <!-- 03 Image -->
+        <div class="panel">
+            <div class="panel-title">[03] Image</div>
+            <div class="image-container">
+                <div class="img-status" id="img-status">NO TARGET SELECTED</div>
+                <img id="sat-img" alt="Selected satellite" referrerpolicy="no-referrer">
+            </div>
+            <div class="img-credit" id="img-credit"></div>
+        </div>
+
+        <!-- 04 Terminal -->
+        <div class="panel">
+            <div class="panel-title">[04] Terminal</div>
+            <div class="terminal-container">
+                <div class="terminal-log" id="term-log"></div>
+                <div class="terminal-actions">
+                    <button onclick="clearTerminal()">CLEAR TERMINAL</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 05 Ground Station Controls -->
+        <div class="panel" style="grid-column: span 2;">
+            <div class="panel-title">[05] Ground Station Controls</div>
+            <div style="font-size: 11px; color: #888; margin-bottom: 8px;">MANUAL OVERRIDE & STEPPER MOTOR MANAGEMENT. GIMBAL NOT CONNECTED YET: COMMANDS ARE LOGGED ONLY.</div>
+            <div class="controls-grid">
+                <button onclick="triggerAction('HOMING')">HOMING / ZERO AXES</button>
+                <button onclick="triggerAction('TRACKING_LOCK')">ENABLE TRACKING LOCK</button>
+                <button onclick="triggerAction('PARK_ZENITH')">PARK GIMBAL (ZENITH)</button>
+                <button onclick="refreshEphemeris()">REFRESH EPHEMERIS CACHE</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const POLL_MS = 1000;
+
+        let selected = null;          // NORAD id of the chosen satellite
+        let listKey = '';             // remembers the dropdown contents so we only rebuild on change
+        let serverUp = null;          // null = unknown, true/false after first poll
+        let lastStatus = '';          // last status line, so we log changes instead of spamming
+        const infoCache = {};         // norad -> /api/info response
+        const imageCache = {};        // wiki title -> image url
+
+        const $ = (id) => document.getElementById(id);
+
+        // ---- Clock -----------------------------------------------------------
+        setInterval(() => {
+            $('utc-clock').innerText = 'UTC: ' + new Date().toUTCString().split(' ')[4];
+        }, 1000);
+
+        // ---- Terminal --------------------------------------------------------
+        function logTerminal(message) {
+            const log = $('term-log');
+            const p = document.createElement('p');
+            p.style.color = '#fff';
+            p.innerText = `> ${message}`;
+            log.appendChild(p);
+            while (log.children.length > 200) log.removeChild(log.firstChild);
+            log.scrollTop = log.scrollHeight;
+        }
+        function clearTerminal() {
+            $('term-log').innerHTML = '<p>> TERMINAL BUFFER CLEARED.</p>';
+        }
+
+        // ---- Backend polling (once per second) -----------------------------
+        async function poll() {
+            try {
+                const url = '/api/state' + (selected !== null ? `?track=${selected}` : '');
+                const res = await fetch(url, { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (serverUp !== true) {
+                    logTerminal('SERVER LINK ESTABLISHED.');
+                    $('srv-status').innerText = 'SERVER: OK';
+                    serverUp = true;
+                }
+                $('dropdown-label').innerText = `TARGET (ABOVE ${data.min_el}° ELEVATION):`;
+                renderDropdown(data.targets);
+                renderTelemetry(data);
+            } catch (err) {
+                if (serverUp !== false) {
+                    logTerminal('SERVER LINK LOST (' + err.message + '). IS python src/server.py RUNNING?');
+                    $('srv-status').innerText = 'SERVER: OFFLINE';
+                    serverUp = false;
+                }
+            }
+        }
+
+        // Rebuild the dropdown only when the set of satellites changes, and not while
+        // the user has it open (rebuilding an open <select> snaps it shut).
+        function renderDropdown(targets) {
+            const sel = $('sat-dropdown');
+            const key = targets.map(t => t.norad).join(',');
+            if (key === listKey || document.activeElement === sel) return;
+            listKey = key;
+
+            sel.innerHTML = '';
+            if (targets.length === 0) {
+                sel.innerHTML = '<option value="">NOTHING ABOVE HORIZON</option>';
+                return;
+            }
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = `-- ${targets.length} ABOVE HORIZON --`;
+            sel.appendChild(placeholder);
+
+            // Featured targets (ones with a write-up in catalog.py) come first.
+            let selectedStillListed = false;
+            const groups = [
+                ['FEATURED', targets.filter(t => t.featured)],
+                ['OTHER', targets.filter(t => !t.featured)],
+            ];
+            for (const [label, members] of groups) {
+                if (members.length === 0) continue;
+                const group = document.createElement('optgroup');
+                group.label = `${label} (${members.length})`;
+                for (const t of members) {
+                    const opt = document.createElement('option');
+                    opt.value = t.norad;
+                    const tag = (!t.featured && t.type) ? ` // ${t.type}` : '';
+                    opt.textContent = `${t.name} // NORAD ${t.norad}${tag}`;
+                    if (t.norad === selected) { opt.selected = true; selectedStillListed = true; }
+                    group.appendChild(opt);
+                }
+                sel.appendChild(group);
+            }
+            // The chosen satellite has set. Keep it in the list so the dropdown does not lie.
+            if (selected !== null && !selectedStillListed) {
+                const opt = document.createElement('option');
+                opt.value = selected;
+                opt.textContent = `${(infoCache[selected] || {}).name || 'TARGET'} // NORAD ${selected} (SET)`;
+                opt.selected = true;
+                sel.insertBefore(opt, sel.children[1]);
+            }
+        }
+
+        function renderTelemetry(data) {
+            const t = data.tracked;
+            if (selected === null || !t) {
+                setStatus('NO TARGET');
+                return;
+            }
+            if (t.az === null) {
+                $('val-norad').innerText = 'NORAD-' + t.norad;
+                for (const id of ['val-az', 'val-el', 'val-range', 'val-azrate', 'val-elrate']) $(id).innerText = '--';
+                setStatus('NO SOLUTION (TLE STALE)');
+                return;
+            }
+            $('val-norad').innerText = 'NORAD-' + t.norad;
+            $('val-az').innerText = t.az.toFixed(2) + '°';
+            $('val-el').innerText = t.el.toFixed(2) + '°';
+            $('val-range').innerText = t.range_km.toFixed(1) + ' KM';
+            $('val-azrate').innerText = t.az_rate.toFixed(3) + ' °/S';
+            $('val-elrate').innerText = t.el_rate.toFixed(3) + ' °/S';
+            setStatus(t.above ? 'ABOVE HORIZON' : 'BELOW HORIZON');
+        }
+
+        function setStatus(text) {
+            $('val-status').innerText = text;
+            if (text !== lastStatus && selected !== null) logTerminal('STATUS: ' + text);
+            lastStatus = text;
+        }
+
+        // ---- Target selection -------------------------------------------------
+        $('sat-dropdown').addEventListener('change', (e) => {
+            const norad = e.target.value ? parseInt(e.target.value, 10) : null;
+            selectTarget(norad);
+            e.target.blur();
+        });
+
+        async function selectTarget(norad) {
+            selected = norad;
+            lastStatus = '';
+            if (norad === null) {
+                $('object-info-panel').innerHTML = '<p>SELECT A TARGET.</p>';
+                showImageMessage('NO TARGET SELECTED');
+                return;
+            }
+            logTerminal(`TARGET SELECTED: NORAD ${norad}`);
+            logTerminal('GIMBAL: NOT CONNECTED. NO VECTOR SENT.');
+            poll();
+            try {
+                if (!infoCache[norad]) {
+                    const res = await fetch(`/api/info/${norad}`);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    infoCache[norad] = await res.json();
+                }
+                if (selected !== norad) return;   // user already picked something else
+                renderInfo(infoCache[norad]);
+                loadImage(infoCache[norad]);
+            } catch (err) {
+                logTerminal('ERROR: INFO LOOKUP FAILED (' + err.message + ')');
+            }
+        }
+
+        // Escape text before putting it in HTML (names come from outside data).
+        function esc(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function row(label, value) {
+            return `<p><strong>${label}:</strong> ${esc(value)}</p>`;
+        }
+
+        function renderInfo(info) {
+            let html = row('NAME', info.name);
+            if (info.mission) {
+                html += row('MISSION', info.mission);
+                if (info.history) html += row('HISTORY', info.history);
+                if (info.science) html += row('SCIENCE FOCUS', info.science);
+            } else if (info.classification) {
+                html += row('CLASSIFICATION', info.classification);
+                html += '<p style="color:#777;">NO WRITE-UP YET. THE LINE ABOVE COMES FROM CELESTRAK SATCAT. ADD A WRITE-UP IN src/catalog.py.</p>';
+            } else {
+                html += '<p style="color:#777;">NO CATALOG DATA AVAILABLE. SHOWING ORBIT DATA FROM THE TLE ONLY.</p>';
+            }
+            if (info.mission && info.object_type_name) {
+                html += row('TYPE', info.object_type_name);
+                if (info.owner) html += row('OWNER', info.owner);
+                if (info.launch_date) html += row('LAUNCHED', info.launch_date);
+            }
+            html += row('INCLINATION', info.inclination_deg + '°');
+            html += row('ORBITAL PERIOD', info.period_min + ' MIN');
+            html += row('TLE AGE', info.tle_age_days + ' DAYS');
+            $('object-info-panel').innerHTML = html;
+        }
+
+        // ---- Image (Wikipedia lead image, looked up at runtime) -------------
+        function showImageMessage(msg) {
+            $('sat-img').style.display = 'none';
+            $('img-status').style.display = 'block';
+            $('img-status').innerText = msg;
+            $('img-credit').innerText = '';
+        }
+
+        async function loadImage(info) {
+            if (!info.wiki) {
+                const kind = (info.object_type_name || 'OBJECT').toUpperCase();
+                showImageMessage(`${kind}\nNO PHOTOGRAPH ON FILE`);
+                return;
+            }
+            showImageMessage('LOADING IMAGE...');
+            try {
+                if (!imageCache[info.wiki]) {
+                    const res = await fetch(
+                        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(info.wiki)}`
+                    );
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const data = await res.json();
+                    const src = (data.thumbnail && data.thumbnail.source) ||
+                                (data.originalimage && data.originalimage.source);
+                    if (!src) throw new Error('no image on page');
+                    imageCache[info.wiki] = src;
+                }
+                const img = $('sat-img');
+                img.onload = () => { $('img-status').style.display = 'none'; img.style.display = 'block'; };
+                img.onerror = () => { showImageMessage('IMAGE FAILED TO LOAD'); logTerminal('ERROR: IMAGE LOAD FAILED'); };
+                img.src = imageCache[info.wiki];
+                $('img-credit').innerText = 'SOURCE: WIKIPEDIA';
+            } catch (err) {
+                showImageMessage('IMAGE UNAVAILABLE');
+                logTerminal('ERROR: IMAGE LOOKUP FAILED (' + err.message + ')');
+            }
+        }
+
+        // ---- Buttons ----------------------------------------------------------
+        function triggerAction(action) {
+            logTerminal(`${action}: NOT SENT. GIMBAL HARDWARE NOT CONNECTED.`);
+        }
+
+        async function refreshEphemeris() {
+            logTerminal('REQUESTING FRESH TLE DOWNLOAD FROM CELESTRAK...');
+            try {
+                const res = await fetch('/api/refresh', { method: 'POST' });
+                const data = await res.json();
+                logTerminal((res.ok ? 'OK: ' : 'REFUSED: ') + data.message);
+                if (res.ok) listKey = '';
+            } catch (err) {
+                logTerminal('ERROR: REFRESH REQUEST FAILED (' + err.message + ')');
+            }
+        }
+
+        // ---- Start ------------------------------------------------------------
+        logTerminal('ARGUS-TWIN DASHBOARD STARTED.');
+        poll();
+        setInterval(poll, POLL_MS);
+    </script>
+</body>
+</html>

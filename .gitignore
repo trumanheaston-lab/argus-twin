@@ -1,0 +1,8 @@
+﻿venv/
+data/*.tle
+__pycache__/
+venv/
+__pycache__/
+*.pyc
+data/*.csv
+data/*.tle
