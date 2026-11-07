@@ -117,12 +117,13 @@
             position: relative;
         }
         .view-container img {
+            position: absolute; inset: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
             display: none;
         }
-        #sky-canvas { width: 100%; height: 100%; display: none; cursor: crosshair; }
+        #sky-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; cursor: crosshair; }
         .img-status {
             position: absolute;
             color: #555;
@@ -170,6 +171,16 @@
         }
         button:hover { border-color: #ff3333; color: #ff3333; }
 
+        .ctl-groups { display: flex; flex-wrap: wrap; gap: 14px; overflow-y: auto; }
+        .ctl-group { display: flex; flex-direction: column; gap: 5px; min-width: 150px; flex: 1; }
+        .ctl-title { font-size: 10px; color: #ff3333; border-bottom: 1px solid #222; padding-bottom: 2px; }
+        .ctl-note { font-size: 9px; color: #666; line-height: 1.3; }
+        .dpad { display: grid; grid-template-columns: repeat(3, 38px); gap: 3px; justify-content: center; }
+        .dpad button { padding: 6px 0; font-size: 13px; touch-action: none; }
+        .dpad button.held { border-color: #ff3333; color: #ff3333; }
+        .speed-row { display: flex; gap: 3px; }
+        .speed-row button { flex: 1; padding: 4px 0; font-size: 10px; }
+
         .modal-back {
             position: fixed; inset: 0; background: rgba(0,0,0,0.8);
             display: none; align-items: center; justify-content: center; z-index: 10;
@@ -190,7 +201,7 @@
 <body>
 
     <header>
-        <div class="sys-title">PROJECT ARGUS-TWIN // DRIPPING SPRINGS, TX [30.19°N, 98.09°W]</div>
+        <div class="sys-title">PROJECT ARGUS-TWIN // DRIPPING SPRINGS, TX [30.129°N, 97.985°W]</div>
         <div class="mode-switch">
             <button id="mode-sat" class="active" onclick="setMode('sat')">SATELLITES</button>
             <button id="mode-sky" onclick="setMode('sky')">ASTRONOMY</button>
@@ -254,21 +265,50 @@
 
         <!-- 05 Ground Station Controls -->
         <div class="panel" style="grid-column: span 2;">
-            <div class="panel-title"><span>[05] Ground Station Controls</span></div>
-            <div style="font-size: 11px; color: #888; margin-bottom: 4px;" id="gimbal-line">GIMBAL: NOT CONNECTED</div>
-            <div style="font-size: 10px; color: #555; margin-bottom: 8px;">HOMING ZEROES AT THE CURRENT POSE: AIM LEVEL AND DUE NORTH FIRST. NEVER POINT AT THE SUN. TARGETS WITHIN 15° OF THE SUN ARE BLOCKED.</div>
-            <div class="controls-grid">
-                <button onclick="gimbalConnect('SIM')">CONNECT SIMULATOR</button>
-                <button onclick="gimbalConnectNexStar()">CONNECT CELESTRON</button>
-                <button onclick="gimbalConnectSerial()">CONNECT ARDUINO GIMBAL</button>
-                <button onclick="gimbalDisconnect()">DISCONNECT</button>
-                <button onclick="gimbalCommand('HOME')">HOMING / ZERO AXES</button>
-                <button onclick="gimbalLock()">ENABLE TRACKING LOCK</button>
-                <button onclick="gimbalCommand('PARK')">PARK GIMBAL</button>
-                <button onclick="gimbalCommand('STOP')">STOP / RELEASE LOCK</button>
-                <button onclick="openHorizon()">EDIT HORIZON MASK</button>
-                <button onclick="horizonSample()">ADD MASK POINT FROM MOUNT</button>
-                <button onclick="refreshEphemeris()">REFRESH SATELLITE DATA</button>
+            <div class="panel-title"><span>[05] Telescope Controls</span></div>
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;" id="gimbal-line">TELESCOPE: NOT CONNECTED</div>
+            <div style="font-size: 10px; color: #555; margin-bottom: 8px;">NEVER POINT AT THE SUN WITHOUT A CERTIFIED SOLAR FILTER. THE SOFTWARE BLOCKS TARGETS WITHIN 15° OF THE SUN.</div>
+            <div class="ctl-groups">
+                <div class="ctl-group">
+                    <div class="ctl-title">1. CONNECT</div>
+                    <button onclick="gimbalConnect('SIM')">PRACTICE MODE (NO TELESCOPE)</button>
+                    <button onclick="gimbalConnectNexStar()">CONNECT TO CELESTRON</button>
+                    <button onclick="gimbalDisconnect()">DISCONNECT</button>
+                </div>
+                <div class="ctl-group">
+                    <div class="ctl-title">2. ALIGN</div>
+                    <button onclick="gimbalCommand('HOME')">ROUGH: LEVEL + NORTH HERE</button>
+                    <button onclick="gimbalSync()">BEST: SCOPE IS ON SELECTED TARGET</button>
+                    <div class="ctl-note">BEST: PICK A BRIGHT TARGET (VEGA), CENTER IT IN THE EYEPIECE WITH THE HAND CONTROLLER, THEN PRESS.</div>
+                </div>
+                <div class="ctl-group">
+                    <div class="ctl-title">3. TRACK</div>
+                    <button onclick="gimbalLock()">FOLLOW SELECTED TARGET</button>
+                    <button onclick="gimbalCommand('STOP')">STOP EVERYTHING</button>
+                    <button onclick="gimbalCommand('PARK')">PARK TELESCOPE</button>
+                </div>
+                <div class="ctl-group">
+                    <div class="ctl-title">MANUAL AIM</div>
+                    <div class="dpad">
+                        <span></span><button data-dir="up">▲</button><span></span>
+                        <button data-dir="left">◀</button><button onclick="gimbalCommand('STOP')">■</button><button data-dir="right">▶</button>
+                        <span></span><button data-dir="down">▼</button><span></span>
+                    </div>
+                    <div class="speed-row">
+                        <button id="spd-slow" onclick="setSpeed('slow')">SLOW</button>
+                        <button id="spd-medium" class="active" onclick="setSpeed('medium')">MED</button>
+                        <button id="spd-fast" onclick="setSpeed('fast')">FAST</button>
+                    </div>
+                    <button id="keys-btn" onclick="toggleKeys()">ARROW KEYS: OFF</button>
+                    <div class="ctl-note">KEYS ON: ARROWS AIM, 1/2/3 SPEED, SPACE STOPS.</div>
+                </div>
+                <div class="ctl-group">
+                    <div class="ctl-title">TREES &amp; BUILDINGS</div>
+                    <button onclick="openHorizon()">EDIT OBSTRUCTION LIST</button>
+                    <button onclick="horizonSample()">MARK OBSTRUCTION AT SCOPE</button>
+                    <div class="ctl-title" style="margin-top:8px;">DATA</div>
+                    <button onclick="refreshEphemeris()">UPDATE SATELLITE DATA</button>
+                </div>
             </div>
         </div>
     </div>
@@ -806,10 +846,10 @@
                     body: JSON.stringify(body || {}),
                 });
                 const data = await res.json();
-                logTerminal((res.ok ? 'GIMBAL: ' : 'GIMBAL REFUSED: ') + data.message);
+                logTerminal((res.ok ? 'TELESCOPE: ' : 'TELESCOPE REFUSED: ') + data.message);
                 return res.ok;
             } catch (err) {
-                logTerminal('GIMBAL REQUEST FAILED (' + err.message + ')');
+                logTerminal('TELESCOPE REQUEST FAILED (' + err.message + ')');
                 return false;
             }
         }
@@ -818,14 +858,84 @@
         const gimbalDisconnect = () => gimbalPost('/disconnect');
         const gimbalCommand = (cmd) => gimbalPost('/command', { cmd });
 
-        function gimbalConnectSerial() {
-            const port = window.prompt('Serial port, for example COM5 (see Arduino IDE > Tools > Port):');
-            if (port) gimbalConnect(port.trim());
+        function gimbalConnectNexStar() {
+            const port = window.prompt('Hand controller COM port, for example COM5 (Windows Device Manager > Ports):');
+            if (port) gimbalConnect('NEXSTAR:' + port.trim());
         }
 
-        function gimbalConnectNexStar() {
-            const port = window.prompt('Celestron hand controller COM port, for example COM5 (Device Manager > Ports):');
-            if (port) gimbalConnect('NEXSTAR:' + port.trim());
+        // ---- Manual aim: on-screen pad and arrow keys -------------------------------
+        let speed = 'medium', keysOn = false, jogTimer = null, lastJogMsg = '';
+        const held = new Set();
+
+        function setSpeed(next) {
+            speed = next;
+            for (const k of ['slow', 'medium', 'fast']) $('spd-' + k).classList.toggle('active', k === next);
+            if (held.size) jogUpdate();
+        }
+
+        async function sendJog() {
+            const az = (held.has('right') ? 1 : 0) - (held.has('left') ? 1 : 0);
+            const el = (held.has('up') ? 1 : 0) - (held.has('down') ? 1 : 0);
+            try {
+                const res = await fetch('/api/gimbal/jog', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ az, el, speed }),
+                });
+                const data = await res.json();
+                const msg = res.ok ? '' : data.message.toUpperCase();
+                if (msg && msg !== lastJogMsg) logTerminal('MANUAL AIM REFUSED: ' + msg);
+                lastJogMsg = msg;
+            } catch (err) { /* server offline: poll() reports it */ }
+        }
+
+        function jogUpdate() {
+            document.querySelectorAll('.dpad button[data-dir]').forEach(b => b.classList.toggle('held', held.has(b.dataset.dir)));
+            if (held.size) {
+                sendJog();
+                if (!jogTimer) jogTimer = setInterval(sendJog, 250);   // the telescope stops by itself if this stops
+            } else {
+                if (jogTimer) { clearInterval(jogTimer); jogTimer = null; }
+                sendJog();
+            }
+        }
+
+        function releaseAllKeys() { if (held.size) { held.clear(); jogUpdate(); } }
+
+        function toggleKeys() {
+            keysOn = !keysOn;
+            $('keys-btn').innerText = 'ARROW KEYS: ' + (keysOn ? 'ON' : 'OFF');
+            $('keys-btn').classList.toggle('active', keysOn);
+            if (!keysOn) releaseAllKeys();
+            logTerminal('ARROW KEY CONTROL ' + (keysOn ? 'ON' : 'OFF'));
+        }
+
+        document.querySelectorAll('.dpad button[data-dir]').forEach(b => {
+            b.addEventListener('pointerdown', (e) => { e.preventDefault(); held.add(b.dataset.dir); jogUpdate(); });
+            for (const ev of ['pointerup', 'pointerleave', 'pointercancel'])
+                b.addEventListener(ev, () => { if (held.delete(b.dataset.dir)) jogUpdate(); });
+        });
+
+        const KEY_DIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+        window.addEventListener('keydown', (e) => {
+            if (!keysOn || $('horizon-modal').classList.contains('open')) return;
+            const tag = e.target.tagName;
+            if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+            if (KEY_DIR[e.key]) {
+                e.preventDefault();
+                if (tag === 'SELECT') e.target.blur();
+                if (!e.repeat && !held.has(KEY_DIR[e.key])) { held.add(KEY_DIR[e.key]); jogUpdate(); }
+            } else if (e.key === ' ') {
+                e.preventDefault(); releaseAllKeys(); gimbalCommand('STOP');
+            } else if (e.key === '1' || e.key === '2' || e.key === '3') {
+                setSpeed(['slow', 'medium', 'fast'][+e.key - 1]);
+            }
+        });
+        window.addEventListener('keyup', (e) => { if (KEY_DIR[e.key] && held.delete(KEY_DIR[e.key])) jogUpdate(); });
+        window.addEventListener('blur', releaseAllKeys);          // clicking away must never leave it moving
+
+        function gimbalSync() {
+            if (selected === null) { logTerminal('PICK THE TARGET YOU ARE LOOKING AT FIRST.'); return; }
+            gimbalPost('/sync', { target: selected });
         }
 
         function gimbalLock() {
@@ -838,12 +948,12 @@
                 const res = await fetch('/api/gimbal', { cache: 'no-store' });
                 const g = await res.json();
                 gimbalState = g;
-                let line = 'GIMBAL: ';
+                let line = 'TELESCOPE: ';
                 if (!g.connected) line += 'NOT CONNECTED';
                 else {
                     line += `${g.link} // ${g.state}`;
                     if (g.pos) line += ` // AZ ${g.pos.az.toFixed(2)}° EL ${g.pos.el.toFixed(2)}°`;
-                    line += g.tracking !== null ? ` // LOCKED ON ${String(g.tracking).toUpperCase()}` : ' // NO LOCK';
+                    line += g.tracking !== null ? ` // LOCKED ON ${String(g.tracking).toUpperCase()}` : ' // NOT FOLLOWING ANYTHING';
                 }
                 $('gimbal-line').innerText = line;
                 if (g.log.length && g.log[g.log.length - 1].seq < lastSeq) lastSeq = 0;   // server restarted

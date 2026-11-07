@@ -19,6 +19,8 @@ import targets
 TICK_S = 1.0                      # how often a target line is sent
 POLL_S = 0.1                      # how often we read replies from the link
 COMMANDS = ('HOME', 'PARK', 'STOP')
+JOG_SPEEDS = {'slow': 0.1, 'medium': 0.5, 'fast': 2.0}   # degrees per second
+JOG_WATCHDOG_S = 0.6              # manual motion stops this long after the last jog message
 
 
 def _wrap180(delta):
@@ -56,6 +58,25 @@ class SimulatedLink:
                 return
             self._target = (az, el, azr, elr, now)
             self._state = 'TRACKING'
+        elif cmd == 'J' and len(parts) == 3:
+            try:
+                azr, elr = float(parts[1]), float(parts[2])
+            except ValueError:
+                self._out.append('ERR,BAD_NUMBER')
+                return
+            if azr == 0.0 and elr == 0.0:
+                self._target, self._state = None, 'IDLE'
+            else:
+                self._target = (azr, elr, 0.0, 0.0, now)
+                self._state = 'JOG'
+        elif cmd == 'SYNC' and len(parts) == 3:
+            try:
+                self.az, self.el = float(parts[1]), float(parts[2])
+            except ValueError:
+                self._out.append('ERR,BAD_NUMBER')
+                return
+            self._target, self._state = None, 'IDLE'
+            self._out.append('OK,SYNC')
         elif cmd == 'HOME':
             self.az = self.el = 0.0
             self._target, self._state = None, 'IDLE'
@@ -78,7 +99,13 @@ class SimulatedLink:
         if self._target is not None:
             az, el, azr, elr, t0 = self._target
             age = now - t0
-            if self._state == 'TRACKING' and age > self.watchdog_s:
+            if self._state == 'JOG':
+                if age > JOG_WATCHDOG_S:
+                    self._target, self._state = None, 'IDLE'
+                else:
+                    self.az += az * dt                  # for JOG, (az, el) hold the rates
+                    self.el = _clamp(self.el + el * dt, 0.0, 90.0)
+            elif self._state == 'TRACKING' and age > self.watchdog_s:
                 self._target, self._state = None, 'IDLE'
                 self._out.append('ERR,WATCHDOG')
             else:
@@ -110,8 +137,7 @@ class SerialLink:
     """Real board over USB serial, 115200 baud, one text line per message."""
 
     def __init__(self, port, baud=115200):
-        import importlib
-        serial = importlib.import_module('serial')  # pip install pyserial
+        import serial                      # pip install pyserial
         self.name = port
         self._ser = serial.Serial(port, baud, timeout=0)
         self._buf = b''
@@ -155,7 +181,7 @@ class NexStarLink:
 
     def __init__(self, port=None, ser=None, baud=9600):
         if ser is None:
-            serial = __import__('serial')       # pip install pyserial
+            import serial                       # pip install pyserial
             ser = serial.Serial(port, baud, timeout=0.05)
         self._ser = ser
         self.name = 'NEXSTAR ' + (port or 'TEST')
@@ -167,6 +193,7 @@ class NexStarLink:
         self._mode = 'IDLE'
         self._goto_active = False
         self._errs = collections.deque(maxlen=4)
+        self._jog = None                        # (az_rate, el_rate, time_received) while jogging
         self._last_poll = 0.0
         self._last_ctrl = 0.0
         self._identify()
@@ -258,6 +285,35 @@ class NexStarLink:
                 self._errs.clear()
             self._target = (az, el, azr, elr, now)
             self._mode = 'TRACKING'
+        elif cmd == 'J' and len(parts) == 3:
+            try:
+                azr, elr = float(parts[1]), float(parts[2])
+            except ValueError:
+                self._out.append('ERR,BAD_NUMBER')
+                return
+            if azr == 0.0 and elr == 0.0:
+                self._stop_motion()
+                self._jog, self._mode = None, 'IDLE'
+            else:
+                if self._mode != 'JOG':
+                    self._stop_motion()         # cancel any GoTo or tracking first
+                    self._target = None
+                self._jog, self._mode = (azr, elr, now), 'JOG'
+                self._jog_rates()
+        elif cmd == 'SYNC' and len(parts) == 3:
+            # One-star alignment: the scope is on a known object right now, so make our
+            # frame agree with it on both axes.
+            try:
+                az, el = float(parts[1]), float(parts[2])
+            except ValueError:
+                self._out.append('ERR,BAD_NUMBER')
+                return
+            self._stop_motion()
+            raw_az, raw_alt = self._read_pos()
+            self._az_off, self._alt_off = (raw_az - az) % 360.0, raw_alt - el
+            self._pos = (az % 360.0, el)
+            self._target, self._jog, self._mode = None, None, 'IDLE'
+            self._out.append('OK,SYNC')
         elif cmd == 'HOME':
             # Declare the current pose to be north + level. Aim the tube first.
             self._stop_motion()
@@ -275,7 +331,7 @@ class NexStarLink:
             self._out.append('OK,PARK')
         elif cmd == 'STOP':
             self._stop_motion()
-            self._target, self._mode = None, 'IDLE'
+            self._target, self._jog, self._mode = None, None, 'IDLE'
             self._out.append('OK,STOP')
         elif cmd == 'PING':
             if self._xfer(b'KA') == b'A':
@@ -291,7 +347,14 @@ class NexStarLink:
             state = 'SLEWING' if (self._mode == 'TRACKING' and self._goto_active) else \
                     ('PARKED' if self._mode == 'PARKED' else self._mode)
             self._out.append(f'POS,{self._pos[0] % 360.0:.2f},{self._pos[1]:.2f},{state}')
-        if self._mode == 'TRACKING':
+        if self._mode == 'JOG':
+            if now - self._jog[2] > JOG_WATCHDOG_S:
+                self._stop_motion()
+                self._jog, self._mode = None, 'IDLE'
+            elif now - self._last_ctrl >= self.CONTROL_S:
+                self._last_ctrl = now
+                self._jog_rates()               # re-check the elevation limits as it moves
+        elif self._mode == 'TRACKING':
             if now - self._target[4] > self.WATCHDOG_S:
                 self._stop_motion()
                 self._target, self._mode = None, 'IDLE'
@@ -306,6 +369,14 @@ class NexStarLink:
         lines = list(self._out)
         self._out.clear()
         return lines
+
+    def _jog_rates(self):
+        """Apply the manual rates, but never push the tube past level or straight up."""
+        azr, elr, _ = self._jog
+        if self._pos is not None:
+            if (elr < 0 and self._pos[1] <= 0.0) or (elr > 0 and self._pos[1] >= 90.0):
+                elr = 0.0
+        self._rates(azr, elr)
 
     def _control(self, now):
         az_t, el_t, azr, elr, t0 = self._target
@@ -440,6 +511,51 @@ class Gimbal:
             self._last_send = 0.0
             self._last_block = None
             self._log(f'TRACKING LOCK ON: {self.tracking}')
+
+    def sync(self, target):
+        """One-star alignment: tell the mount it is pointing exactly at `target`."""
+        norm = targets.normalize(target)
+        with self._lock:
+            if self._link is None:
+                raise RuntimeError('gimbal not connected')
+            st = targets.state(norm)
+            if st is None or st.get('az') is None:
+                raise RuntimeError('no position for that target')
+            if st['el'] < 5.0:
+                raise RuntimeError('target is too low to align on (needs 5 deg or more above the horizon)')
+            reason = safety.keepout_reason(st['az'], st['el'])
+            if reason:
+                raise RuntimeError(reason.lower())
+            self.tracking = None
+            self._link.write_line(f"SYNC,{st['az']:.3f},{st['el']:.3f}")
+            self._log(f"ALIGNED ON {str(norm).upper()}: AZ {st['az']:.2f} EL {st['el']:.2f}")
+
+    def jog(self, az_dir, el_dir, speed='medium'):
+        """Manual motion while a key is held. Directions are -1, 0 or +1. The browser
+        repeats this every ~250 ms; the link stops by itself if the messages stop."""
+        if speed not in JOG_SPEEDS:
+            raise ValueError('unknown speed')
+        az_dir, el_dir = int(_clamp(az_dir, -1, 1)), int(_clamp(el_dir, -1, 1))
+        with self._lock:
+            if self._link is None:
+                raise RuntimeError('gimbal not connected')
+            if az_dir == 0 and el_dir == 0:
+                self._link.write_line('J,0,0')
+                return
+            rate = JOG_SPEEDS[speed]
+            azr, elr = az_dir * rate, el_dir * rate
+            if self.pos is not None:
+                # Do not let manual motion carry the scope into the Sun keep-out zone.
+                here = safety.keepout_reason(self.pos['az'], self.pos['el'])
+                ahead = safety.keepout_reason((self.pos['az'] + azr * 1.5) % 360.0,
+                                              _clamp(self.pos['el'] + elr * 1.5, 0.0, 90.0))
+                if ahead and not here:
+                    self._link.write_line('J,0,0')
+                    raise RuntimeError(ahead.lower() + '. manual motion stopped')
+            if self.tracking is not None:
+                self.tracking = None
+                self._log('TRACKING LOCK OFF (MANUAL CONTROL)')
+            self._link.write_line(f'J,{azr:.3f},{elr:.3f}')
 
     def release(self):
         with self._lock:

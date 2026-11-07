@@ -146,4 +146,33 @@ except TimeoutError as exc:
 finally:
     NexStarLink._xfer = orig
 print('silent mount error OK')
+
+# 11. Manual jog: moves at the requested rate, stops by itself, and respects the elevation floor
+fake, link = make(az=10.0, alt=5.0)
+link.write_line('J,1.000,0.000')
+run(link, 1.0, send=lambda: 'J,1.000,0.000', every=0.2)
+assert 10.7 < fake.az < 11.5 and abs(fake.alt - 5.0) < 0.05, (fake.az, fake.alt)
+run(link, 1.0)                                              # no more messages: the watchdog stops it
+assert fake.rate_az == 0.0 and link._mode == 'IDLE', (fake.rate_az, link._mode)
+fake, link = make(az=0.0, alt=0.2)
+link.write_line('STOP')
+run(link, 0.3)
+link.write_line('J,0.000,-2.000')
+run(link, 1.5, send=lambda: 'J,0.000,-2.000', every=0.2)
+assert fake.alt > -0.6, fake.alt                           # it ran into the floor and was held there
+link.write_line('J,0,0')
+assert fake.rate_alt == 0.0 and fake.rate_az == 0.0
+print('manual jog OK')
+
+# 12. One-star alignment: offsets on both axes, then GoTo lands in the corrected frame
+fake, link = make(az=100.0, alt=10.0)
+link.write_line('SYNC,30.000,40.000')
+run(link, 0.3)
+assert abs(link._pos[0] - 30.0) < 0.01 and abs(link._pos[1] - 40.0) < 0.01, link._pos
+link._goto(35.0, 40.0)
+run(link, 0.3)
+time.sleep(0.2)
+fake._step()
+assert abs(fake.az - 105.0) < 0.1 and abs(fake.alt - 10.0) < 0.1, (fake.az, fake.alt)
+print('one-star alignment OK')
 print('NEXSTAR TESTS PASSED')

@@ -29,8 +29,10 @@ MIN_FORCED_REFRESH_SECONDS = 600  # the Refresh button cannot hammer the server
 # and the list fills with objects you could never actually point at.
 MIN_ELEVATION_DEG = 10.0
 
-# Dripping Springs, TX
-OBSERVER = wgs84.latlon(30.1902, -98.0867, elevation_m=350)
+# Your exact spot (Hays County, near Dripping Springs, TX), from the phone/browser GPS.
+# Elevation is approximate: an error of tens of meters changes nothing you could see.
+LATITUDE, LONGITUDE, ELEVATION_M = 30.128885, -97.985047, 350
+OBSERVER = wgs84.latlon(LATITUDE, LONGITUDE, elevation_m=ELEVATION_M)
 
 _loader = Loader(DATA_DIR)
 ts = _loader.timescale()

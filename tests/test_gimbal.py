@@ -164,4 +164,58 @@ assert g.status()['tracking'] == 25544
 sky.state = orig_sky_state
 client.post('/api/gimbal/disconnect')
 print('sky targets through the gimbal OK')
+
+# 13. Manual aim (arrow keys): moves while messages keep coming, stops by itself when they stop
+assert client.post('/api/gimbal/jog', json={'az': 1, 'el': 0}).status_code == 409        # not connected
+assert client.post('/api/gimbal/connect', json={'port': 'SIM'}).status_code == 200
+assert wait_for(lambda: g.status()['pos'] is not None)
+assert client.post('/api/gimbal/jog', json={'az': 1, 'el': 0, 'speed': 'warp'}).status_code == 400
+g.command('HOME')
+g.track(25544)
+start = time.monotonic()
+while time.monotonic() - start < 1.0:                       # hold the right arrow for 1 s at fast (2 deg/s)
+    assert client.post('/api/gimbal/jog', json={'az': 1, 'el': 0, 'speed': 'fast'}).status_code == 200
+    time.sleep(0.2)
+assert g.status()['tracking'] is None                       # manual aim releases the lock
+assert wait_for(lambda: g.pos and 1.0 < g.pos['az'] < 3.5), g.pos
+held_az = None
+assert wait_for(lambda: g.state == 'IDLE', 3.0), g.state     # key released: watchdog stops it
+a1 = g.pos['az']; time.sleep(0.8)
+assert abs(g.pos['az'] - a1) < 0.05, 'kept moving after the keys stopped'
+# elevation cannot go below level
+for _ in range(8):
+    client.post('/api/gimbal/jog', json={'az': 0, 'el': -1, 'speed': 'fast'}); time.sleep(0.2)
+assert g.pos['el'] >= 0.0, g.pos
+# explicit zero stops at once
+client.post('/api/gimbal/jog', json={'az': 0, 'el': 1, 'speed': 'fast'}); time.sleep(0.4)
+client.post('/api/gimbal/jog', json={'az': 0, 'el': 0}); time.sleep(0.8)
+e1 = g.pos['el']; time.sleep(0.6)
+assert abs(g.pos['el'] - e1) < 0.05
+# the Sun guard refuses manual motion that would enter the keep-out zone
+g._link.az, g._link.el = 100.0, 30.0
+time.sleep(0.8)
+safety.sun_altaz = lambda t=None: (30.0, 120.0)
+r = client.post('/api/gimbal/jog', json={'az': 1, 'el': 0, 'speed': 'fast'})
+assert r.status_code == 409 and 'KEEP-OUT' in r.get_json()['message'].upper(), r.get_json()
+safety.sun_altaz = lambda t=None: (-30.0, 0.0)
+client.post('/api/gimbal/disconnect')
+print('manual aim OK')
+
+# 14. One-star alignment: the mount's reported position snaps to the target's true position
+assert client.post('/api/gimbal/sync', json={'target': 25544}).status_code == 409           # not connected
+assert client.post('/api/gimbal/connect', json={'port': 'SIM'}).status_code == 200
+assert wait_for(lambda: g.status()['pos'] is not None)
+g._link.az, g._link.el = 50.0, 20.0
+FAKE.update(az=30.0, el=40.0)
+assert client.post('/api/gimbal/sync', json={'target': 25544}).status_code == 200
+assert wait_for(lambda: g.pos and abs(g.pos['az'] - 30.0) < 0.6 and abs(g.pos['el'] - 40.0) < 0.6), g.pos
+FAKE['el'] = 2.0
+assert client.post('/api/gimbal/sync', json={'target': 25544}).status_code == 409           # too low
+FAKE['el'] = 40.0
+safety.sun_altaz = lambda t=None: (40.0, 33.0)
+assert client.post('/api/gimbal/sync', json={'target': 25544}).status_code == 409           # near the Sun
+safety.sun_altaz = lambda t=None: (-30.0, 0.0)
+assert client.post('/api/gimbal/sync', json={'target': 'nonsense'}).status_code == 400
+client.post('/api/gimbal/disconnect')
+print('one-star alignment OK')
 print('GIMBAL TESTS PASSED')

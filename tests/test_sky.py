@@ -125,15 +125,14 @@ print('catalog:', kinds)
 if HAVE_EPH:
     # ---- 6. Cross-check against an independent implementation -------------------------
     try:
-        import importlib
-        ephem = importlib.import_module('ephem')
+        import ephem  # type: ignore[import-not-found]
     except ImportError:
         ephem = None
         print('pyephem not installed: skipping independent cross-check (pip install ephem)')
     if ephem:
         def ephem_altaz(make, when):
             o = ephem.Observer()
-            o.lat, o.lon, o.elevation, o.pressure = '30.1902', '-98.0867', 350, 0   # pressure 0: no refraction
+            o.lat, o.lon, o.elevation, o.pressure = str(tracker.LATITUDE), str(tracker.LONGITUDE), tracker.ELEVATION_M, 0   # pressure 0: no refraction
             o.date = when
             b = make()
             b.compute(o)

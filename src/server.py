@@ -242,6 +242,30 @@ def gimbal_track():
     return jsonify({'ok': True, 'message': f'tracking {target}'})
 
 
+@app.post('/api/gimbal/sync')
+def gimbal_sync():
+    try:
+        gimbal.gimbal.sync(_body().get('target'))
+    except ValueError:
+        return jsonify({'ok': False, 'message': 'unknown target'}), 400
+    except RuntimeError as exc:
+        return jsonify({'ok': False, 'message': str(exc)}), 409
+    return jsonify({'ok': True, 'message': 'aligned: the telescope now agrees with that target'})
+
+
+@app.post('/api/gimbal/jog')
+def gimbal_jog():
+    body = _body()
+    try:
+        gimbal.gimbal.jog(int(body.get('az', 0)), int(body.get('el', 0)),
+                          str(body.get('speed', 'medium')))
+    except (ValueError, TypeError):
+        return jsonify({'ok': False, 'message': 'bad jog request'}), 400
+    except RuntimeError as exc:
+        return jsonify({'ok': False, 'message': str(exc)}), 409
+    return jsonify({'ok': True, 'message': 'jog'})
+
+
 @app.post('/api/gimbal/command')
 def gimbal_command():
     cmd = str(_body().get('cmd', '')).upper()
